@@ -9,7 +9,7 @@
 -define (TIMEOUT_MULTICAST_MS, 10000).
 
 %%%% Files Structures
-% Data = {filename, here, {file, consistent, versions}}
+% Data = {filename, consistent, locked, {file, versions}}
 % versions = [{location, version}]
 
 
@@ -59,7 +59,7 @@ terminate(_Reason, _State) -> ok.
 %% handlers
 % New file sync call
 handle_call({new_local_file, Filename, File}, _From, {Servers, Data}) ->
-	New_Data = {Filename, true, {File, true, [{get_self(), 1}]}},
+	New_Data = {Filename, true, 0, {File, [{get_self(), 1}]}},
 	reliable_multicast({new_file, Filename}, Servers),
 	{reply, ok, {Servers, lists:keymerge(1, Data, [New_Data])}};
 
@@ -71,7 +71,7 @@ handle_call(flush_state, _From, State) ->
 	{reply, State, State};
 
 handle_call({new_file, Filename}, _From, {Servers, Data}) ->
-	New_Data = lists:keymerge(1, Data, [{Filename, false, {}}]),
+	New_Data = lists:keymerge(1, Data, [{Filename, false, 0, {}}]),
 	{reply, ok, {Servers, New_Data}};
 
 handle_call({get_file, Filename}, _From, {Servers, Data}) ->
@@ -80,15 +80,14 @@ handle_call({get_file, Filename}, _From, {Servers, Data}) ->
 	{New_Data, Return_File} = case File_Found of
 		false ->
 			{Data, doesnt_exist};
-		{_Filename_Found, Here, {File, _Consist, _Versions}} when Here -> 
-			% need to check consist
+		{_Filename_Found, Consist, _Lock, {File, _Versions}} when Consist -> 
 			{Data, File};
-		{_Filename_Found, Here, _File} when not Here ->
+		{_Filename_Found, Consist, Lock, _File} when not Consist ->
 			% get remote file field
-			{Remote_File, _Consist, Remote_Versions} = get_remote_file(Filename, Servers),
+			{Remote_File, Remote_Versions} = get_remote_file(Filename, Servers),
 			% update the versions list locally
 			New_Versions = lists:keymerge(1, Remote_Versions, [{get_self(), 1}]),
-			New_D = lists:keyreplace(Filename, 1, Data, {Filename, true, {Remote_File, true, New_Versions}}),
+			New_D = lists:keyreplace(Filename, 1, Data, {Filename, true, Lock, {Remote_File, New_Versions}}),
 			% multicast the new holder of file to current holders
 			%Current_Holders = lists:map(fun fst/1, Remote_Versions),
 				%%%% RACE CONDItION!!!!! if 2 new holders: the current holder will send obsolete 
@@ -102,33 +101,38 @@ handle_call({get_file, Filename}, _From, {Servers, Data}) ->
 	{reply, Return_File, {Servers, New_Data}};
 
 handle_call({new_file_holder, Filename, New_Holder}, _From, {Servers, Data}) ->
-	{_Filename_Found, Here, {File, Consist, Versions}} = lists:keyfind(Filename, 1, Data),
+	{_Filename_Found, Consist, Lock, {File, Versions}} = lists:keyfind(Filename, 1, Data),
 	if
-		Here ->
+		Consist ->
 			New_Versions = lists:keymerge(1, Versions, [{New_Holder, 1}]),
-			New_Data = lists:keyreplace(Filename, 1, Data, {Filename, true, {File, Consist, New_Versions}});
+			New_Data = lists:keyreplace(Filename, 1, Data, {Filename, true, Lock, {File, New_Versions}});
 		true ->
 			New_Data = Data
 	end,
 	{reply, ok, {Servers, New_Data}};
 
 handle_call({file_query, Filename}, _From, {Servers, Data}) ->
-	{_Filename_Found, Here, {_File, _Consist, _Versions}} = lists:keyfind(Filename, 1, Data),
+	{_Filename_Found, Consist, Lock, File} = lists:keyfind(Filename, 1, Data),
 	% need to check consist
-	Reply = if
-		Here ->
-			{available, get_self()};
-		not Here ->
+	{Reply, New_Data} = if
+		Consist ->
+			%%%% RACE CONDITION!!! what if two workers query the same file: find and lock must be atomic
+			New_D = lists:keyreplace(Filename, 1, Data, {Filename, true, Lock+1, File}),
+			{{available, get_self()}, New_D};
+		not Consist ->
 			unavailable
 	end,
-	{reply, Reply, {Servers, Data}};
+	{reply, Reply, {Servers, New_Data}};
 
 
 handle_call({file_download, Filename}, _From, {Servers, Data}) ->
-	{_Filename_Found, _Here, File} = lists:keyfind(Filename, 1, Data),
+	{_Filename_Found, _Consist, Lock, File} = lists:keyfind(Filename, 1, Data),
 	% don't need to check consist here, since it will be done at file_query
 	%%%% RACE CONDITION!!! what if between file_query and file_download the file is deleted?
-	{reply, File, {Servers, Data}};
+	%% Solution, use of locks
+	%%%% RACE CONDITION!!! what if two workers finish the download at the same time: download and unlock must be atomic
+	New_Data = lists:keyreplace(Filename, 1, Data, {Filename, true, Lock-1, File}),
+	{reply, File, {Servers, New_Data}};
 
 handle_call(_Reason, _From, State) ->
 	{noreply, State}.
