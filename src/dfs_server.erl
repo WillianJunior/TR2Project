@@ -1,7 +1,7 @@
 -module(dfs_server).
 -behaviour (gen_server).
 -export([start_link/0, start_link/1]).
--export([create_file/2, get_file/1, flush_data/0, flush_state/0]).
+-export([create_file/2, get_file/1, flush_data/0, flush_state/0, new_server/1]).
 -export([init/1, code_change/3, terminate/2, handle_cast/2
 	, handle_call/3, handle_info/2]).
 
@@ -40,6 +40,9 @@ flush_data() ->
 flush_state() ->
 	gen_server:call(dfs_server, flush_state).
 
+new_server(Server) ->
+	gen_server:call(dfs_server, {new_server, Server}).
+
 %% Async call
 %ping_all() ->
 %	Nodes = nodes(),
@@ -59,6 +62,11 @@ code_change(_OldVsn, State, _Extra) ->
 terminate(_Reason, _State) -> ok.
 
 %% Client Functions Handlers
+% add a new server manually
+handle_call({new_server, Server}, _From, {Servers, Data}) ->
+	New_Servers = [Server|Servers],
+	{reply, ok, {New_Servers, Data}};
+
 % New file sync call
 handle_call({new_local_file, Filename, File}, _From, {Servers, Data}) ->
 	New_Data = {Filename, true, 0, {File, [{get_self(), 1}]}},
