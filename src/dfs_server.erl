@@ -115,7 +115,7 @@ handle_info(_Request, State) ->
 
 %%% Server Functions Handlers
 %% Add a new file descriptor from a remote server
-handle_cast({From, {new_file, Filename}}, {Servers, Data}) ->
+handle_cast({new_file, From, Filename}, {Servers, Data}) ->
 	New_Data = lists:keymerge(1, Data, [{Filename, false, 0, {}}]),
 	{ok, Socket} = gen_udp:open(get_random_port(), [binary, {active, false}]),
 	gen_udp:send(Socket, From, ?DFS_SERVER_UDP_PORT, term_to_binary({ack, get_self()})),
@@ -132,9 +132,12 @@ handle_cast({new_file_holder, Filename, New_Holder}, {Servers, Data}) ->
 		true ->
 			New_Data = Data
 	end,
-	{reply, {ack, get_self()}, {Servers, New_Data}};
+	{ok, Socket} = gen_udp:open(get_random_port(), [binary, {active, false}]),
+	gen_udp:send(Socket, New_Holder, ?DFS_SERVER_UDP_PORT, term_to_binary({ack, get_self()})),
+	gen_udp:close(Socket),
+	{noreply, {Servers, New_Data}};
 
-handle_cast({file_query, Filename}, {Servers, Data}) ->
+handle_cast({file_query, From, Filename}, {Servers, Data}) ->
 	{_Filename_Found, Consist, Lock, File} = lists:keyfind(Filename, 1, Data),
 	% need to check consist
 	{Reply, New_Data} = if
@@ -145,17 +148,22 @@ handle_cast({file_query, Filename}, {Servers, Data}) ->
 		not Consist ->
 			unavailable
 	end,
-	{reply, {get_self(), Reply}, {Servers, New_Data}};
+	{ok, Socket} = gen_udp:open(get_random_port(), [binary, {active, false}]),
+	gen_udp:send(Socket, From, ?DFS_SERVER_UDP_PORT, term_to_binary({get_self(), Reply})),
+	gen_udp:close(Socket),
+	{noreply, {Servers, New_Data}};
 
-
-handle_cast({file_download, Filename}, {Servers, Data}) ->
+handle_cast({file_download, From, Filename}, {Servers, Data}) ->
 	{_Filename_Found, _Consist, Lock, File} = lists:keyfind(Filename, 1, Data),
 	% don't need to check consist here, since it will be done at file_query
 	%%%% RACE CONDITION!!! what if between file_query and file_download the file is deleted?
 	%% Solution, use of locks
 	%%%% RACE CONDITION!!! what if two workers finish the download at the same time: download and unlock must be atomic
 	New_Data = lists:keyreplace(Filename, 1, Data, {Filename, true, Lock-1, File}),
-	{reply, File, {Servers, New_Data}}.
+	{ok, Socket} = gen_udp:open(get_random_port(), [binary, {active, false}]),
+	gen_udp:send(Socket, From, ?DFS_SERVER_UDP_PORT, term_to_binary(File)),
+	gen_udp:close(Socket),
+	{noreply, {Servers, New_Data}}.
 
 %handle_cast({hello, From}, {Servers, Data}) ->
 %	io:format("hello from ~s~n", [atom_to_list(From)]),
@@ -289,12 +297,12 @@ reply_multicast(Socket, [_Dest|Group], Fun) ->
 reply_multicast(_Socket, [], _Fun) -> [].
 
 get_remote_file(Filename, Servers) ->
-	Responses = reliable_multicall({file_query, Filename}, Servers, fun get_available/1),
+	Responses = reliable_multicall({file_query, get_self(), Filename}, Servers, fun get_available/1),
 	First_Server = hd(Responses),
 	%gen_server:call(First_Server, {file_download, Filename}).
 	% when it gets concurent the connection will be gone from here
 	{ok, Socket} = gen_udp:open(get_random_port(), [binary, {active, false}]),
-	gen_udp:send(Socket, First_Server, ?DFS_SERVER_UDP_PORT, term_to_binary({file_download, Filename})),
+	gen_udp:send(Socket, First_Server, ?DFS_SERVER_UDP_PORT, term_to_binary({file_download, get_self(), Filename})),
 	gen_udp:recv(Socket, 0),
 	gen_udp:close(Socket).
 	

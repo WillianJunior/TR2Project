@@ -33,7 +33,7 @@ loop(Socket) ->
 		{ok, {_Addr, _Port, Packet}} ->
 			Payload = binary_to_term(Packet),
 			gen_server:cast(dfs_server, Payload),
-			io:format("sent cast~n");
+			io:format("sent cast~sn", [atom_to_list(Payload)]);
 		{error, _Reason} -> ok
 			% need to log this later
 	end,
