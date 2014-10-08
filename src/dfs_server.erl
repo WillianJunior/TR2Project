@@ -115,9 +115,12 @@ handle_info(_Request, State) ->
 
 %%% Server Functions Handlers
 %% Add a new file descriptor from a remote server
-handle_cast({new_file, Filename}, {Servers, Data}) ->
+handle_cast({From, {new_file, Filename}}, {Servers, Data}) ->
 	New_Data = lists:keymerge(1, Data, [{Filename, false, 0, {}}]),
-	{reply, {ack, get_self()}, {Servers, New_Data}};
+	{ok, Socket} = gen_udp:open(get_random_port(), [binary, {active, false}]),
+	gen_udp:send(Socket, From, ?DFS_SERVER_UDP_PORT, term_to_binary({ack, get_self()})),
+	gen_udp:close(Socket),
+	{noreply, {Servers, New_Data}};
 
 %% Add a new file holder after a remote server read a file it did not posses
 handle_cast({new_file_holder, Filename, New_Holder}, {Servers, Data}) ->
@@ -220,7 +223,7 @@ reliable_multicast(Message, Group) ->
 
 %% Multicast a nessage
 multicast(Socket, Message, [Dest|Group]) ->
-	io:format("multicasting to ~s~n", [atom_to_list(Dest)]),
+	%io:format("multicasting to ~s~n", [atom_to_list(Dest)]),
 	Payload = term_to_binary(Message),
 	gen_udp:send(Socket, Dest, ?DFS_SERVER_UDP_PORT, Payload),
 	multicast(Socket, Message, Group);
@@ -292,7 +295,8 @@ get_remote_file(Filename, Servers) ->
 	% when it gets concurent the connection will be gone from here
 	{ok, Socket} = gen_udp:open(get_random_port(), [binary, {active, false}]),
 	gen_udp:send(Socket, First_Server, ?DFS_SERVER_UDP_PORT, term_to_binary({file_download, Filename})),
-	gen_udp:recv(Socket, 0).
+	gen_udp:recv(Socket, 0),
+	gen_udp:close(Socket).
 	
 
 
