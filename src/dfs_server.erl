@@ -291,9 +291,9 @@ reliable_multicall(Message, Group, Fun) ->
 %reliable_multicall(_Message, [], _Fun) -> [].
 
 reply_multicast(Socket, [_Dest|Group], Fun) -> 
-	try  {ok, {_Addr, _Port, Msg}} = gen_udp:recv(Socket, 0, ?TIMEOUT_MULTICAST_MS), binary_to_term(Msg) of
-		Reply ->
-			[Fun(Reply)|reply_multicast(Socket, Group, Fun)]
+	try  {ok, {Addr, _Port, Msg}} = gen_udp:recv(Socket, 0, ?TIMEOUT_MULTICAST_MS), {Addr, binary_to_term(Msg)} of
+		{Recvr, Reply} ->
+			[{Recvr, Fun(Reply)}|reply_multicast(Socket, Group, Fun)]
 	catch
 		_Error ->
 			reply_multicast(Socket, Group, Fun)
