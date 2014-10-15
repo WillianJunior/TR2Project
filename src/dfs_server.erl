@@ -70,7 +70,7 @@ handle_call({new_server, Server}, _From, {Servers, Data}) ->
 % New file sync call
 handle_call({new_local_file, Filename, File}, _From, {Servers, Data}) ->
 	New_Data = {Filename, true, 0, {File, [{get_self(), 1}]}},
-	reliable_multicast({new_file, Filename}, Servers),
+	reliable_multicast({new_file, get_self(), Filename}, Servers),
 	{reply, ok, {Servers, lists:keymerge(1, Data, [New_Data])}};
 
 % Get file list
@@ -100,7 +100,7 @@ handle_call({get_file, Filename}, _From, {Servers, Data}) ->
 				%% Versions and the new holders won't know about each other
 				%% Solution: Broadcast instead...
 				%% worse eficiency, but correct
-			reliable_multicast({new_file_holder, Filename, get_self()}, Servers),
+			reliable_multicast({new_file_holder, Filename}, Servers),
 			{New_D, Remote_File};
 		_ -> {Data, false}
 	end,
@@ -110,34 +110,37 @@ handle_call(_Reason, _From, State) ->
 	{noreply, State}.
 
 % currently not needed. send event to a logger later
+handle_info({udp, From, Port, Msg}, State) ->
+	{noreply, State};
+
 handle_info(_Request, State) ->
 	{noreply, State}.
 
 %%% Server Functions Handlers
 %% Add a new file descriptor from a remote server
-handle_cast({new_file, From, Filename}, {Servers, Data}) ->
+handle_cast({{From_IP, From_Port}, {new_file, Filename}}, {Servers, Data}) ->
 	New_Data = lists:keymerge(1, Data, [{Filename, false, 0, {}}]),
 	{ok, Socket} = gen_udp:open(get_random_port(), [binary, {active, false}]),
-	gen_udp:send(Socket, From, ?DFS_SERVER_UDP_PORT, term_to_binary({ack, get_self()})),
+	gen_udp:send(Socket, From_IP, From_Port, term_to_binary({ack, get_self()})),
 	gen_udp:close(Socket),
 	{noreply, {Servers, New_Data}};
 
 %% Add a new file holder after a remote server read a file it did not posses
-handle_cast({new_file_holder, Filename, New_Holder}, {Servers, Data}) ->
+handle_cast({{From_IP, From_Port}, {new_file_holder, Filename}}, {Servers, Data}) ->
 	{_Filename_Found, Consist, Lock, {File, Versions}} = lists:keyfind(Filename, 1, Data),
 	if
 		Consist ->
-			New_Versions = lists:keymerge(1, Versions, [{New_Holder, 1}]),
+			New_Versions = lists:keymerge(1, Versions, [{From_IP, 1}]),
 			New_Data = lists:keyreplace(Filename, 1, Data, {Filename, true, Lock, {File, New_Versions}});
 		true ->
 			New_Data = Data
 	end,
 	{ok, Socket} = gen_udp:open(get_random_port(), [binary, {active, false}]),
-	gen_udp:send(Socket, New_Holder, ?DFS_SERVER_UDP_PORT, term_to_binary({ack, get_self()})),
+	gen_udp:send(Socket, From_IP, From_Port, term_to_binary({ack, get_self()})),
 	gen_udp:close(Socket),
 	{noreply, {Servers, New_Data}};
 
-handle_cast({file_query, From, Filename}, {Servers, Data}) ->
+handle_cast({{From_IP, From_Port}, {file_query, Filename}}, {Servers, Data}) ->
 	{_Filename_Found, Consist, Lock, File} = lists:keyfind(Filename, 1, Data),
 	% need to check consist
 	{Reply, New_Data} = if
@@ -149,11 +152,11 @@ handle_cast({file_query, From, Filename}, {Servers, Data}) ->
 			unavailable
 	end,
 	{ok, Socket} = gen_udp:open(get_random_port(), [binary, {active, false}]),
-	gen_udp:send(Socket, From, ?DFS_SERVER_UDP_PORT, term_to_binary({get_self(), Reply})),
+	gen_udp:send(Socket, From_IP, From_Port, term_to_binary({get_self(), Reply})),
 	gen_udp:close(Socket),
 	{noreply, {Servers, New_Data}};
 
-handle_cast({file_download, From, Filename}, {Servers, Data}) ->
+handle_cast({{From_IP, From_Port}, {file_download, Filename}}, {Servers, Data}) ->
 	{_Filename_Found, _Consist, Lock, File} = lists:keyfind(Filename, 1, Data),
 	% don't need to check consist here, since it will be done at file_query
 	%%%% RACE CONDITION!!! what if between file_query and file_download the file is deleted?
@@ -161,7 +164,7 @@ handle_cast({file_download, From, Filename}, {Servers, Data}) ->
 	%%%% RACE CONDITION!!! what if two workers finish the download at the same time: download and unlock must be atomic
 	New_Data = lists:keyreplace(Filename, 1, Data, {Filename, true, Lock-1, File}),
 	{ok, Socket} = gen_udp:open(get_random_port(), [binary, {active, false}]),
-	gen_udp:send(Socket, From, ?DFS_SERVER_UDP_PORT, term_to_binary(File)),
+	gen_udp:send(Socket, From_IP, From_Port, term_to_binary(File)),
 	gen_udp:close(Socket),
 	{noreply, {Servers, New_Data}}.
 
@@ -233,7 +236,7 @@ reliable_multicast(Message, Group) ->
 multicast(Socket, Message, [Dest|Group]) ->
 	%io:format("multicasting to ~s~n", [atom_to_list(Dest)]),
 	Payload = term_to_binary(Message),
-	gen_udp:send(Socket, Dest, ?DFS_SERVER_UDP_PORT, Payload),
+	gen_udp:send(Socket, Dest, ?DFS_SERVER_UDP_PORT, getPayload),
 	multicast(Socket, Message, Group);
 multicast(_Socket, _Message, []) -> ok.
 
@@ -297,12 +300,12 @@ reply_multicast(Socket, [_Dest|Group], Fun) ->
 reply_multicast(_Socket, [], _Fun) -> [].
 
 get_remote_file(Filename, Servers) ->
-	Responses = reliable_multicall({file_query, get_self(), Filename}, Servers, fun get_available/1),
+	Responses = reliable_multicall({file_query, Filename}, Servers, fun get_available/1),
 	First_Server = hd(Responses),
 	%gen_server:call(First_Server, {file_download, Filename}).
 	% when it gets concurent the connection will be gone from here
 	{ok, Socket} = gen_udp:open(get_random_port(), [binary, {active, false}]),
-	gen_udp:send(Socket, First_Server, ?DFS_SERVER_UDP_PORT, term_to_binary({file_download, get_self(), Filename})),
+	gen_udp:send(Socket, First_Server, ?DFS_SERVER_UDP_PORT, term_to_binary({file_download, Filename})),
 	gen_udp:recv(Socket, 0),
 	gen_udp:close(Socket).
 	

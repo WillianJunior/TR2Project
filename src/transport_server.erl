@@ -30,10 +30,10 @@ init(Arg) -> loop(Arg).
 loop(Socket) ->
 	Message = gen_udp:recv(Socket, 0),
 	case Message of
-		{ok, {_Addr, _Port, Packet}} ->
+		{ok, {Addr, Port, Packet}} ->
 			Payload = binary_to_term(Packet),
-			gen_server:cast(dfs_server, Payload),
-			io:format("sent cast~sn", [atom_to_list(Payload)]);
+			gen_server:cast(dfs_server, {{Addr, Port}, Payload});
+			%io:format("sent cast~sn", [atom_to_list(Payload)]);
 		{error, _Reason} -> ok
 			% need to log this later
 	end,
