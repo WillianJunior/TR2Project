@@ -223,7 +223,6 @@ reliable_multicast(Message, Group) ->
 			multicast(Socket, Message, Group),
 			% get a list of receivers that replied
 			Replies = ack_multicast(Socket, Group),
-			format_list(lists:subtract(Group, Replies)),
 			% update server list by sending unreachable_dest for receivers that did not reply
 			Cast_Fn = fun(Dest) -> gen_server:cast(get_self(), {unreachable_dest, Dest}) end,
 			lists:map(Cast_Fn, lists:subtract(Group, Replies)),
@@ -307,8 +306,9 @@ get_remote_file(Filename, Servers) ->
 	% when it gets concurent the connection will be gone from here
 	{ok, Socket} = gen_udp:open(get_random_port(), [binary, {active, false}]),
 	gen_udp:send(Socket, First_Server, ?DFS_SERVER_UDP_PORT, term_to_binary({file_download, Filename})),
-	gen_udp:recv(Socket, 0),
-	gen_udp:close(Socket).
+	{ok, {_Addr, _Port, Msg}} = gen_udp:recv(Socket, 0),
+	gen_udp:close(Socket),
+	binary_to_term(Msg).
 	
 
 
