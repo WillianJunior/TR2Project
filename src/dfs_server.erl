@@ -146,10 +146,10 @@ handle_cast({{From_IP, From_Port}, {file_query, Filename}}, {Servers, Data}) ->
 			New_D = lists:keyreplace(Filename, 1, Data, {Filename, true, Lock+1, File}),
 			{{available, get_self()}, New_D};
 		not Consist ->
-			unavailable
+			{unavailable, Data}
 	end,
 	{ok, Socket} = gen_udp:open(get_random_port(), [binary, {active, false}]),
-	gen_udp:send(Socket, From_IP, From_Port, term_to_binary({get_self(), Reply})),
+	gen_udp:send(Socket, From_IP, From_Port, term_to_binary(Reply)),
 	gen_udp:close(Socket),
 	{noreply, {Servers, New_Data}};
 
@@ -292,8 +292,8 @@ reliable_multicall(Message, Group, Fun) ->
 
 reply_multicast(Socket, [_Dest|Group], Fun) -> 
 	try  {ok, {_Addr, _Port, Msg}} = gen_udp:recv(Socket, 0, ?TIMEOUT_MULTICAST_MS), binary_to_term(Msg) of
-		{reply, Recvr, Reply} ->
-			[{Recvr, Fun(Reply)}|reply_multicast(Socket, Group, Fun)]
+		Reply ->
+			[Fun(Reply)|reply_multicast(Socket, Group, Fun)]
 	catch
 		_Error ->
 			reply_multicast(Socket, Group, Fun)
