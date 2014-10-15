@@ -70,7 +70,7 @@ handle_call({new_server, Server}, _From, {Servers, Data}) ->
 % New file sync call
 handle_call({new_local_file, Filename, File}, _From, {Servers, Data}) ->
 	New_Data = {Filename, true, 0, {File, [{get_self(), 1}]}},
-	reliable_multicast({new_file, get_self(), Filename}, Servers),
+	reliable_multicast({new_file, Filename}, Servers),
 	{reply, ok, {Servers, lists:keymerge(1, Data, [New_Data])}};
 
 % Get file list
@@ -110,9 +110,6 @@ handle_call(_Reason, _From, State) ->
 	{noreply, State}.
 
 % currently not needed. send event to a logger later
-handle_info({udp, From, Port, Msg}, State) ->
-	{noreply, State};
-
 handle_info(_Request, State) ->
 	{noreply, State}.
 
@@ -166,7 +163,11 @@ handle_cast({{From_IP, From_Port}, {file_download, Filename}}, {Servers, Data}) 
 	{ok, Socket} = gen_udp:open(get_random_port(), [binary, {active, false}]),
 	gen_udp:send(Socket, From_IP, From_Port, term_to_binary(File)),
 	gen_udp:close(Socket),
-	{noreply, {Servers, New_Data}}.
+	{noreply, {Servers, New_Data}};
+
+handle_cast({unreachable_dest, _Dest}, State) ->
+	io:format("Server out~n"),
+	{noreply, State}.
 
 %handle_cast({hello, From}, {Servers, Data}) ->
 %	io:format("hello from ~s~n", [atom_to_list(From)]),
@@ -187,7 +188,7 @@ handle_cast({{From_IP, From_Port}, {file_download, Filename}}, {Servers, Data}) 
 %%% Private Functions
 %fst({First, _Second}) -> First.
 
-get_self() -> {192,164,0,3}.
+get_self() -> {192,168,0,8}.
 
 %hail_all() ->
 %	Nodes = nodes(),
@@ -222,6 +223,7 @@ reliable_multicast(Message, Group) ->
 			multicast(Socket, Message, Group),
 			% get a list of receivers that replied
 			Replies = ack_multicast(Socket, Group),
+			format_list(lists:subtract(Group, Replies)),
 			% update server list by sending unreachable_dest for receivers that did not reply
 			Cast_Fn = fun(Dest) -> gen_server:cast(get_self(), {unreachable_dest, Dest}) end,
 			lists:map(Cast_Fn, lists:subtract(Group, Replies)),
@@ -234,15 +236,15 @@ reliable_multicast(Message, Group) ->
 
 %% Multicast a nessage
 multicast(Socket, Message, [Dest|Group]) ->
-	%io:format("multicasting to ~s~n", [atom_to_list(Dest)]),
+	%io:format("multicasting ~s to ~s~n", [atom_to_list(Message), atom_to_list(Dest)]),
 	Payload = term_to_binary(Message),
-	gen_udp:send(Socket, Dest, ?DFS_SERVER_UDP_PORT, getPayload),
+	gen_udp:send(Socket, Dest, ?DFS_SERVER_UDP_PORT, Payload),
 	multicast(Socket, Message, Group);
 multicast(_Socket, _Message, []) -> ok.
 
 %% Colect a list of destinations that replied the multicast
 ack_multicast(Socket, [_Dest|Group]) -> 
-	try gen_udp:recv(Socket, 0, ?TIMEOUT_MULTICAST_MS) of
+	try {ok, {_Addr, _Port, Msg}} = gen_udp:recv(Socket, 0, ?TIMEOUT_MULTICAST_MS), binary_to_term(Msg) of
 		{ack, Recvr} ->
 			[Recvr|ack_multicast(Socket, Group)]
 	catch
@@ -262,7 +264,6 @@ reliable_multicall(Message, Group, Fun) ->
 			multicast(Socket, Message, Group),
 			% collect the replies
 			Reply_List = reply_multicast(Socket, Group, Fun),
-			
 			{Receivers, Replies} = lists:unzip(Reply_List),
 			% update server list by sending unreachable_dest for receivers that did not reply
 			Cast_Fn = fun(Dest) -> gen_server:cast(get_self(), {unreachable_dest, Dest}) end,
@@ -290,7 +291,7 @@ reliable_multicall(Message, Group, Fun) ->
 %reliable_multicall(_Message, [], _Fun) -> [].
 
 reply_multicast(Socket, [_Dest|Group], Fun) -> 
-	try gen_udp:recv(Socket, 0, ?TIMEOUT_MULTICAST_MS) of
+	try  {ok, {_Addr, _Port, Msg}} = gen_udp:recv(Socket, 0, ?TIMEOUT_MULTICAST_MS), binary_to_term(Msg) of
 		{reply, Recvr, Reply} ->
 			[{Recvr, Fun(Reply)}|reply_multicast(Socket, Group, Fun)]
 	catch
@@ -316,3 +317,18 @@ get_available(unavailable) -> [].
 
 %% Generate a random number between 1024 and 49151
 get_random_port() -> random:uniform(48127) + 1024.
+
+%get_third({_A, _B, C}) -> C.
+
+format_list(L) -> %when list(L) ->
+        io:format("["),
+        fnl(L),
+        io:format("]").
+
+    fnl([H]) ->
+        io:format("~p", [H]);
+    fnl([H|T]) ->
+        io:format("~p,", [H]),
+        fnl(T);
+    fnl([]) ->
+        ok.
