@@ -43,11 +43,6 @@ flush_state() ->
 new_server(Server) ->
 	gen_server:call(dfs_server, {new_server, Server}).
 
-%% Async call
-%ping_all() ->
-%	Nodes = nodes(),
-%	ping(Nodes).
-
 %%% Server Functions
 init([]) ->
 	{ok, {[],[]}};
@@ -61,28 +56,78 @@ code_change(_OldVsn, State, _Extra) ->
 % send terminate data to a logger later...
 terminate(_Reason, _State) -> ok.
 
-%% Client Functions Handlers
-% add a new server manually
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%% Client Functions Handlers %%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% Add a new server manually
+% Since the time to perform this operation is short, it won't need a worker
 handle_call({new_server, Server}, _From, {Servers, Data}) ->
 	New_Servers = [Server|Servers],
 	{reply, ok, {New_Servers, Data}};
 
 % New file sync call
 handle_call({new_local_file, Filename, File}, _From, {Servers, Data}) ->
-	New_Data = {Filename, true, 0, {File, [{get_self(), 1}]}},
-	reliable_multicast({new_file, Filename}, Servers),
+	New_Data = new_local_file(Filename, File, Servers),
 	{reply, ok, {Servers, lists:keymerge(1, Data, [New_Data])}};
 
-% Get file list
-handle_call(flush_data, _From, {Servers, Data}) ->
-	{reply, Data, {Servers, Data}};
-
+% Flush the server state
 handle_call(flush_state, _From, State) ->
 	{reply, State, State};
 
+% Get a file:
+%	if the file is present locally, return imediately
+%	if not, get form the first source and send an update of holders
 handle_call({get_file, Filename}, _From, {Servers, Data}) ->
+	{Return_File, New_Data} = get_file(Filename, Data, Servers),
+	{reply, Return_File, {Servers, New_Data}};
+
+handle_call(_Reason, _From, State) ->
+	{noreply, State}.
+
+% currently not needed. send event to a logger later
+handle_info(_Request, State) ->
+	{noreply, State}.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%% Server Functions Handlers %%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% Add a new file descriptor from a remote server
+handle_cast({{From_IP, From_Port}, {new_file, Filename}}, {Servers, Data}) ->
+	New_Data = new_file(From_IP, From_Port, Filename, Data),
+	{noreply, {Servers, New_Data}};
+
+%% Add a new file holder after a remote server read a file it did not posses
+handle_cast({{From_IP, From_Port}, {new_file_holder, Filename}}, {Servers, Data}) ->
+	New_Data = new_file_holder(From_IP, From_Port, Filename, Data),
+	{noreply, {Servers, New_Data}};
+
+handle_cast({{From_IP, From_Port}, {file_query, Filename}}, {Servers, Data}) ->
+	New_Data = file_query(From_IP, From_Port, Filename, Data),
+	{noreply, {Servers, New_Data}};
+
+handle_cast({{From_IP, From_Port}, {file_download, Filename}}, {Servers, Data}) ->
+	New_Data = file_download(From_IP, From_Port, Filename, Data),
+	{noreply, {Servers, New_Data}};
+
+handle_cast({unreachable_dest, _Dest}, State) ->
+	io:format("Server out~n"),
+	{noreply, State}.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%% Server Handlers' Implementations %%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% Create a new file and broadcast the action to the other servers
+new_local_file(Filename, File, Servers) ->
+	New_Data = {Filename, true, 0, {File, [{get_self(), 1}]}},
+	reliable_multicast({new_file, Filename}, Servers),
+	New_Data.
+
+% Returns a wanted file and the updated data if the file wasn't present before
+get_file(Filename, Data, Servers) ->
 	File_Found = lists:keyfind(Filename, 1, Data),
-	%atom_to_list(File_Found),
 	{New_Data, Return_File} = case File_Found of
 		false ->
 			{Data, doesnt_exist};
@@ -104,26 +149,16 @@ handle_call({get_file, Filename}, _From, {Servers, Data}) ->
 			{New_D, Remote_File};
 		_ -> {Data, false}
 	end,
-	{reply, Return_File, {Servers, New_Data}};
+	{Return_File, New_Data}.
 
-handle_call(_Reason, _From, State) ->
-	{noreply, State}.
-
-% currently not needed. send event to a logger later
-handle_info(_Request, State) ->
-	{noreply, State}.
-
-%%% Server Functions Handlers
-%% Add a new file descriptor from a remote server
-handle_cast({{From_IP, From_Port}, {new_file, Filename}}, {Servers, Data}) ->
+new_file(From_IP, From_Port, Filename, Data) ->
 	New_Data = lists:keymerge(1, Data, [{Filename, false, 0, {}}]),
 	{ok, Socket} = gen_udp:open(get_random_port(), [binary, {active, false}]),
 	gen_udp:send(Socket, From_IP, From_Port, term_to_binary({ack, get_self()})),
 	gen_udp:close(Socket),
-	{noreply, {Servers, New_Data}};
+	New_Data.
 
-%% Add a new file holder after a remote server read a file it did not posses
-handle_cast({{From_IP, From_Port}, {new_file_holder, Filename}}, {Servers, Data}) ->
+new_file_holder(From_IP, From_Port, Filename, Data) ->
 	{_Filename_Found, Consist, Lock, {File, Versions}} = lists:keyfind(Filename, 1, Data),
 	if
 		Consist ->
@@ -135,14 +170,15 @@ handle_cast({{From_IP, From_Port}, {new_file_holder, Filename}}, {Servers, Data}
 	{ok, Socket} = gen_udp:open(get_random_port(), [binary, {active, false}]),
 	gen_udp:send(Socket, From_IP, From_Port, term_to_binary({ack, get_self()})),
 	gen_udp:close(Socket),
-	{noreply, {Servers, New_Data}};
+	New_Data.
 
-handle_cast({{From_IP, From_Port}, {file_query, Filename}}, {Servers, Data}) ->
+file_query(From_IP, From_Port, Filename, Data) ->
 	{_Filename_Found, Consist, Lock, File} = lists:keyfind(Filename, 1, Data),
 	% need to check consist
 	{Reply, New_Data} = if
 		Consist ->
 			%%%% RACE CONDITION!!! what if two workers query the same file: find and lock must be atomic
+			%%%% WORSE PROBLEM: the lock never decrement if the server isn't chosen for the download
 			New_D = lists:keyreplace(Filename, 1, Data, {Filename, true, Lock+1, File}),
 			{{available, get_self()}, New_D};
 		not Consist ->
@@ -151,67 +187,25 @@ handle_cast({{From_IP, From_Port}, {file_query, Filename}}, {Servers, Data}) ->
 	{ok, Socket} = gen_udp:open(get_random_port(), [binary, {active, false}]),
 	gen_udp:send(Socket, From_IP, From_Port, term_to_binary(Reply)),
 	gen_udp:close(Socket),
-	{noreply, {Servers, New_Data}};
+	New_Data.
 
-handle_cast({{From_IP, From_Port}, {file_download, Filename}}, {Servers, Data}) ->
+file_download(From_IP, From_Port, Filename, Data) ->
 	{_Filename_Found, _Consist, Lock, File} = lists:keyfind(Filename, 1, Data),
 	% don't need to check consist here, since it will be done at file_query
 	%%%% RACE CONDITION!!! what if between file_query and file_download the file is deleted?
 	%% Solution, use of locks
 	%%%% RACE CONDITION!!! what if two workers finish the download at the same time: download and unlock must be atomic
-	New_Data = lists:keyreplace(Filename, 1, Data, {Filename, true, Lock-1, File}),
 	{ok, Socket} = gen_udp:open(get_random_port(), [binary, {active, false}]),
 	gen_udp:send(Socket, From_IP, From_Port, term_to_binary(File)),
+	New_Data = lists:keyreplace(Filename, 1, Data, {Filename, true, Lock-1, File}),
 	gen_udp:close(Socket),
-	{noreply, {Servers, New_Data}};
+	New_Data.
 
-handle_cast({unreachable_dest, _Dest}, State) ->
-	io:format("Server out~n"),
-	{noreply, State}.
-
-%handle_cast({hello, From}, {Servers, Data}) ->
-%	io:format("hello from ~s~n", [atom_to_list(From)]),
-%	Exists = lists:member(From, Servers),
-%	if
-%		not Exists ->
-%			New_Servers = lists:merge([From], Servers);
-%		true ->
-%			New_Servers = Servers
-%	end,
-%	{noreply, {New_Servers, Data}};
-
-%handle_cast(ping, State) ->
-%	io:format("ping~n"),
-%	{noreply, State}.
-
-
-%%% Private Functions
-%fst({First, _Second}) -> First.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%% Private Functions %%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 get_self() -> {192,168,0,8}.
-
-%hail_all() ->
-%	Nodes = nodes(),
-%	hail_group(Nodes).
-
-%hail_group([N|Ns]) ->
-%	Server = get_server_name(N),
-%	Me = get_self(),
-%	io:format("hailing ~s~n", [atom_to_list(Server)]),
-%	gen_server:cast(Server, {hello, Me}),
-%	hail_group(Ns);
-%hail_group([]) -> ok.
-
-%ping([N|Ns]) ->
-%	Me = get_server_name(N),
-%	io:format("pinging ~s~n", [atom_to_list(Me)]),
-%	gen_server:cast(Me, ping),
-%	ping(Ns);
-%ping([]) -> ok.
-
-%get_server_name(Full_Name) ->
-%	S = string:substr(atom_to_list(Full_Name), 1, string:chr(atom_to_list(Full_Name),  $@)-1),
-%	list_to_atom(S).
 
 %% Perform a multicast of a message to a group
 % If a message can't reach the destination (i.e. no ack) the server is signaled
@@ -276,19 +270,6 @@ reliable_multicall(Message, Group, Fun) ->
 	end,
 	Responses.
 
-%reliable_multicall(Message, [Dest|Group], Fun) ->
-%	io:format("multicalling to ~s~n", [atom_to_list(Dest)]),
-%	Response = try gen_server:call(Dest, Message, ?TIMEOUT_MULTICAST_MS) of
-%		Reply ->
-%			Fun(Reply)
-%	catch
-%		_Error ->
-%			gen_server:cast(get_self(), {unreachable_dest, Dest})
-%	end,
-%	[Response | reliable_multicall(Message, Group, Fun)];
-
-%reliable_multicall(_Message, [], _Fun) -> [].
-
 reply_multicast(Socket, [_Dest|Group], Fun) -> 
 	try  {ok, {Addr, _Port, Msg}} = gen_udp:recv(Socket, 0, ?TIMEOUT_MULTICAST_MS), {Addr, binary_to_term(Msg)} of
 		{Recvr, Reply} ->
@@ -317,8 +298,6 @@ get_available(unavailable) -> [].
 
 %% Generate a random number between 1024 and 49151
 get_random_port() -> random:uniform(48127) + 1024.
-
-%get_third({_A, _B, C}) -> C.
 
 format_list(L) -> %when list(L) ->
         io:format("["),
