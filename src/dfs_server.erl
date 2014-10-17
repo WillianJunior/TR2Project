@@ -1,6 +1,6 @@
 -module(dfs_server).
 -behaviour (gen_server).
--export([start_link/0, start_link/1]).
+-export([start_link/0, start_link/2]).
 -export([create_file/2, get_file/1, flush_data/0, flush_state/0, new_server/1]).
 -export([init/1, code_change/3, terminate/2, handle_cast/2
 	, handle_call/3, handle_info/2]).
@@ -8,9 +8,14 @@
 -define (TIMEOUT_MULTICAST_MS, 10000).
 -define (DFS_SERVER_UDP_PORT, 8678).
 
-%%%% Files Structures
-% Data = {filename, consistent, locked, {file, versions}}
-% versions = [{location, version}]
+%%%% Files' Structures
+% Data = {Filename, Consistent, Lock, {File, Versions}}
+% versions = [{Location, Version}]
+%
+% Servers = [Server]
+% Server = IP
+%
+% State = {Max_Files, Min_Redn, Num_Local_Files}
 
 
 %%% Client API
@@ -18,11 +23,11 @@ start_link() ->
 	%net_kernel:start([Server_Name, shortnames]),
 	gen_server:start_link({local, dfs_server}, dfs_server, [], []).
 
-start_link(_Group) ->
+start_link(Max_Files, Min_Redn) ->
 	%net_kernel:start([Server_Name, shortnames]),
 	%net_kernel:connect_node(Group),
 	%Server_List = lists:map(fun get_server_name/1, nodes()),
-	gen_server:start_link({local, dfs_server}, dfs_server, [], []).
+	gen_server:start_link({local, dfs_server}, dfs_server, {Max_Files, Min_Redn}, []).
 	%hail_all(). %% hailing but not getting the answers
 
 %% Sync call
@@ -44,8 +49,8 @@ new_server(Server) ->
 	gen_server:call(dfs_server, {new_server, Server}).
 
 %%% Server Functions
-init([]) ->
-	{ok, {[],[]}};
+init({Max_Files, Min_Redn}) ->
+	{ok, {[], [], {Max_Files, Min_Redn}}};
 
 init(Server_List) ->
 	{ok, {Server_List, []}}.
@@ -62,14 +67,23 @@ terminate(_Reason, _State) -> ok.
 
 % Add a new server manually
 % Since the time to perform this operation is short, it won't need a worker
-handle_call({new_server, Server}, _From, {Servers, Data}) ->
+handle_call({new_server, Server}, _From, {Servers, Data, State}) ->
 	New_Servers = [Server|Servers],
-	{reply, ok, {New_Servers, Data}};
+	{reply, ok, {New_Servers, Data, State}};
 
 % New file sync call
-handle_call({new_local_file, Filename, File}, _From, {Servers, Data}) ->
-	New_Data = new_local_file(Filename, File, Servers),
-	{reply, ok, {Servers, lists:keymerge(1, Data, [New_Data])}};
+handle_call({new_local_file, Filename, File}, _From, {Servers, Data, {Max_Files, Min_Redn, Num_Local_Files}}) ->
+	% check if Max_Files <= Num_Local_Files
+	if
+		Num_Local_Files >= Max_Files ->
+			% transfer one file before
+			force_download(Filename, Servers),
+			New_Data = remove_locally(Filename, Data);
+		true
+			New_Data = Data
+	end,
+	New_File = new_local_file(Filename, File, Servers, State),
+	{reply, ok, {Servers, lists:keymerge(1, New_Data, [New_File]), {Max_Files, Min_Redn, Num_Local_Files+1}}};
 
 % Flush the server state
 handle_call(flush_state, _From, State) ->
@@ -120,9 +134,10 @@ handle_cast({unreachable_dest, _Dest}, State) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % Create a new file and broadcast the action to the other servers
-new_local_file(Filename, File, Servers) ->
+new_local_file(Filename, File, Servers, Min_Redn) ->
 	New_Data = {Filename, true, 0, {File, [{get_self(), 1}]}},
 	reliable_multicast({new_file, Filename}, Servers),
+	% need to force Min_Redn-1 servers to download the file
 	New_Data.
 
 % Returns a wanted file and the updated data if the file wasn't present before
@@ -140,7 +155,7 @@ get_file(Filename, Data, Servers) ->
 			New_Versions = lists:keymerge(1, Remote_Versions, [{get_self(), 1}]),
 			New_D = lists:keyreplace(Filename, 1, Data, {Filename, true, Lock, {Remote_File, New_Versions}}),
 			% multicast the new holder of file to current holders
-			%Current_Holders = lists:map(fun fst/1, Remote_Versions),
+			% Current_Holders = lists:map(fun fst/1, Remote_Versions),
 				%%%% RACE CONDItION!!!!! if 2 new holders: the current holder will send obsolete 
 				%% Versions and the new holders won't know about each other
 				%% Solution: Broadcast instead...
@@ -182,7 +197,7 @@ file_query(From_IP, From_Port, Filename, Data) ->
 			New_D = lists:keyreplace(Filename, 1, Data, {Filename, true, Lock+1, File}),
 			{{available, get_self()}, New_D};
 		not Consist ->
-			{unavailable, Data}
+			{{unavailable, get_self()}, Data}
 	end,
 	{ok, Socket} = gen_udp:open(get_random_port(), [binary, {active, false}]),
 	gen_udp:send(Socket, From_IP, From_Port, term_to_binary(Reply)),
@@ -205,7 +220,10 @@ file_download(From_IP, From_Port, Filename, Data) ->
 %%%%%%%%%%%%%% Private Functions %%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-get_self() -> {192,168,0,8}.
+get_self() -> 
+	{ok, [{addr, IP}]} = inet:ifget("wlan0", [addr]),
+	IP.
+
 
 %% Perform a multicast of a message to a group
 % If a message can't reach the destination (i.e. no ack) the server is signaled
@@ -294,7 +312,10 @@ get_remote_file(Filename, Servers) ->
 
 
 get_available({available, Server}) -> Server;
-get_available(unavailable) -> [].
+get_available({unavailable, Server}) -> [].
+
+get_unavailable({unavailable, Server}) -> Server;
+get_unavailable({available, Server}) -> [].
 
 %% Generate a random number between 1024 and 49151
 get_random_port() -> random:uniform(48127) + 1024.
