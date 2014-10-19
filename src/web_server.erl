@@ -25,18 +25,20 @@ answer_http_request(Socket) ->
 	{ok, Resp} = gen_tcp:recv(Socket, 0),
 	io:format("~p", [Resp]),
 	Resp_List = re:split(binary_to_list(Resp)," ",[{return,list}]),
-	Filename = lists:nth(2, Resp_List),
-	{Status, Io_Device} = file:open(Filename, read),
+	Filename = "." ++ lists:nth(2, Resp_List),
+	{Status, File} = file:read_file(Filename),
 	case Status of
 		ok ->
-			io:format("file found!~n");
+			Status_Line = "HTTP/1.0 200 OK" ++ ?CRLF,
+			Content_Type_Line = "Content-Type: text/html" ++ ?CRLF ++ ?CRLF,
+			Reply = Status_Line ++ Content_Type_Line,
+			gen_tcp:send(Socket, Reply),
+			gen_tcp:send(Socket, File);
 		error ->
-			io:format("file not found!~n"),
-			Status_Line = "HTTP/1.1 404 Not Found" ++ ?CRLF,
+			Status_Line = "HTTP/1.0 404 Not Found" ++ ?CRLF,
 			Content_Type_Line = "Content-Type: text/html" ++ ?CRLF ++ ?CRLF,
 			Entity_Body = "<HTML><HEAD><TITLE>Not Found</TITLE></HEAD><BODY>Not Found</BODY></HTML>",
 			Reply = Status_Line ++ Content_Type_Line ++ Entity_Body,
-			io:format("~p", [Reply]),
 			gen_tcp:send(Socket, list_to_binary(Reply));
 		_ ->
 			io:format("error~n")
