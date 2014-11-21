@@ -1,11 +1,11 @@
 -module(transport_system).
--export([start_link/0, init/1]).
+-export([start_link/0, init/1, broadcast/1]).
 
 -define (TRANSPORT_UDP_PORT, 8678).
 
 %%% Client API
 start_link() ->
-	{ok, Socket} = gen_udp:open(?DFS_SERVER_UDP_PORT, [binary, {active, false}]),
+	{ok, Socket} = gen_udp:open(?TRANSPORT_UDP_PORT, [binary, {active, false}]),
 	Pid = spawn_link(?MODULE, init, [Socket]),
 	register(?MODULE, Pid).
 
@@ -25,5 +25,5 @@ loop(Socket) ->
 	loop(Socket).
 
 broadcast(Msg) ->
-	{ok, Socket} = gen_udp:open(?DFS_SERVER_UDP_PORT, [binary, {active, false}]),
+	{ok, Socket} = gen_udp:open(?TRANSPORT_UDP_PORT, [binary, {active, false}]),
 	gen_udp:close(Socket).
