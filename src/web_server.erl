@@ -48,12 +48,31 @@ answer_http_request(Socket) ->
 			io:format("post"),
 			%% assuming multipart/form-data always
 			% get boundery and filename
-			{Boundery, Filename} = get_info(Socket, Resp_List),
-			io:format("~p~n~n", [Boundery]),
+			{Boundery, Filename, New_Resp_list} = get_info(Socket, Resp_List),
 			
-			% get file
-			%File_Bin = lists:nth(10, Snd_Header) ++ get_file(Socket, Boundery),
-			%file:write_file(Filename, File_Bin),
+			% get the start of the file from the last msg
+			if
+				length(New_Resp_list) > 19 ->
+					File_Start = lists:sublist(New_Resp_list,20,length(New_Resp_list)-19);
+				true ->
+					File_Start = []
+			end,
+
+			% get file if there is still some parts to receive
+			Last_Part = lists:last(New_Resp_list),
+			io:format("Last_Part = ~p~n~n", [Last_Part]),
+			End = string:str(Last_Part, Boundery),
+			if
+				End =:= 0 ->
+					io:format("downloading the rest~n"),
+					File = File_Start ++ get_file(Socket, Boundery);
+				true ->
+					io:format("more downloading not needed~n"),
+					File = lists:reverse(tl(lists:reverse(File_Start)))
+			end,
+			
+			% write file to a std dir
+			file:write_file("./files/" ++ Filename, list_to_binary(File)),
 
 			% send response
 			Status_Line = "HTTP/1.0 204 No Content" ++ ?CRLF,
@@ -71,11 +90,11 @@ get_request(Socket) ->
 
 get_info(Socket, Req) ->
 	if
-		length(Req) < 14 ->
+		length(Req) < 19 ->
 			Next_Part = get_request(Socket),
 			get_info(Socket, Req ++ Next_Part);
 		true ->
-			{get_boundery(Req), get_filename}
+			{get_boundery(Req), get_filename(Req), Req}
 	end.
 
 get_boundery(Req) -> 
@@ -85,18 +104,19 @@ get_boundery(Req) ->
 	string:substr(Bound_F, Eq_Index+1).
 
 get_filename(Req) ->
-	lists:nth(3, re:split(lists:nth(14,Req), ";", [{return,list}, trim])).
+	Temp = lists:nth(3, re:split(lists:nth(17,Req), ";", [{return,list}, trim])),
+	lists:nth(2, re:split(Temp, "\"", [{return,list},trim])).
 
 get_file(Socket, Boundery) ->
 	{ok, Resp} = gen_tcp:recv(Socket, 0),
 	Resp_List = re:split(binary_to_list(Resp),"\r\n",[{return,list}, trim]),
 	io:format("post~n~p~n~n", [Resp_List]),
-	End = string:equal(lists:last(Resp), Boundery),
+	End = string:str(lists:last(Resp_List), Boundery),
 	if
-		End ->
-			lists:first(Resp_List);
+		End =:= 0 ->
+			lists:nth(1, Resp_List) ++ get_file(Socket, Boundery);
 		true ->
-			lists:first(Resp_List) ++ get_file(Socket, Boundery)
+			lists:nth(1, Resp_List)
 	end.
 
 parse_html(Filename) ->
