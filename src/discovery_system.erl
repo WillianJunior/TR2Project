@@ -40,17 +40,23 @@ terminate(_Reason, _State) -> ok.
 
 handle_cast({hello, IP}, State) ->
 	io:format("got hello~n"),
-	Listener = transport_system:get_random_port_tcp_listen_socket(),
-	{ok, Port} = inet:port(Listener),
-	transport_system:unreliable_unicast(IP, {hello_ack, my_ip(), Port}),
-	Socket = accept_tcp(Listener, ?MAX_TRIES),
+	Me = my_ip(),
 	if
-		Socket /= unreach->
-			io:format("[discovery_system] accepted ~p~n", [IP]);
-		true -> ok
+		IP =/= Me ->
+			Listener = transport_system:get_random_port_tcp_listen_socket(),
+			{ok, Port} = inet:port(Listener),
+			transport_system:unreliable_unicast(IP, {hello_ack, my_ip(), Port}),
+			Socket = accept_tcp(Listener, ?MAX_TRIES),
+			if
+				Socket /= unreach->
+					io:format("[discovery_system] accepted ~p~n", [IP]);
+				true -> ok
+			end;
+			% need to send Socket up
+		true ->
+			ok
 	end,
-	% need to send Socket up
-	{next_state, active, State};
+	{noreply, State};
 
 handle_cast({hello_ack, IP, Port}, State) ->
 	io:format("got hello_ack~n"),
@@ -61,9 +67,7 @@ handle_cast({hello_ack, IP, Port}, State) ->
 		true -> ok
 	end,
 	% need to send Socket up
-	{next_state, active, State}.	
-
-
+	{noreply, State}.	
 
 accept_tcp(_, 0) -> unreach;
 accept_tcp(Listener, Try) ->
