@@ -1,9 +1,8 @@
 -module(discovery_system).
--behaviour (gen_fsm).
--export([start_link/0]).
+-behaviour (gen_server).
+-export([start_link/1]).
 %-export([create_file/2, get_file/1, flush_data/0, flush_state/0, new_server/1]).
--export([init/1, code_change/4, terminate/3, handle_event/3, handle_info/3, handle_sync_event/4]).
--export ([active/2]).
+-export([init/1, code_change/3, terminate/2, handle_info/2, handle_cast/2, handle_call/3]).
 
 -define (RED_MSGS, 3).
 -define (TRANSPORT_UDP_PORT, 8678).
@@ -11,32 +10,37 @@
 -define (MAX_TRIES, 5).
 
 %%% Client API
-start_link() ->
-	gen_server:start_link({local, discovery_system}, discovery_system, [], []).
+start_link(Arg) ->
+	gen_server:start_link({local, discovery_system}, discovery_system, [Arg], []).
 
 %%% Server Functions
-init([]) ->
-	Msg = {hello, my_ip()},
-	transport_system:broadcast(Msg),
-	{ok, active, []}.
+init(Arg) ->
+	F = lists:nth(1, Arg),
+	if
+		F /= first ->
+			io:format("not first~n"),
+			Msg = {hello, my_ip()},
+			transport_system:broadcast(Msg);
+		true -> ok
+	end,
+	{ok, []}.
 
-code_change(_OldVsn, S, State, _Extra) ->
-	{ok, S, State}.
+code_change(_OldVsn, State, _Extra) ->
+	{ok, State}.
 
-handle_event(_E, S, SS) -> {next_state, S, SS}.
+handle_info(_I, S) -> {noreply, S}.
 
-handle_info(_I, S, SS) -> {next_state, S, SS}.
-
-handle_sync_event(_E, _F, S, SS) -> {next_state, S, SS}.
+handle_call(_R, _F, S) -> {noreply, S}.
 
 % send terminate data to a logger later...
-terminate(_Reason, _S, _State) -> ok.
+terminate(_Reason, _State) -> ok.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%% Client Functions Handlers %%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-active({hello, IP}, State) ->
+handle_cast({hello, IP}, State) ->
+	io:format("got hello~n"),
 	Listener = transport_system:get_random_port_tcp_listen_socket(),
 	{ok, Port} = inet:port(Listener),
 	transport_system:unreliable_unicast(IP, {hello_ack, my_ip(), Port}),
@@ -48,7 +52,8 @@ active({hello, IP}, State) ->
 	% need to send Socket up
 	{next_state, active, State};
 
-active({hello_ack, IP, Port}, State) ->
+handle_cast({hello_ack, IP, Port}, State) ->
+	io:format("got hello_ack~n"),
 	Socket = connect_tcp(IP, Port, ?MAX_TRIES),
 	if
 		Socket /= unreach->
@@ -80,5 +85,5 @@ connect_tcp(IP, Port, Try) ->
 	end.
 
 my_ip() -> 
-	{ok, [{addr, IP}]} = inet:ifget("wlan0", [addr]),
+	{ok, [{addr, IP}]} = inet:ifget("eth0", [addr]),
 	IP.
