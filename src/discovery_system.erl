@@ -18,7 +18,6 @@ init(Arg) ->
 	F = lists:nth(1, Arg),
 	if
 		F /= first ->
-			io:format("not first~n"),
 			Msg = {hello, my_ip()},
 			transport_system:broadcast(Msg);
 		true -> ok
@@ -47,7 +46,8 @@ handle_cast({hello, IP}, State) ->
 	Socket = accept_tcp(Listener, ?MAX_TRIES),
 	if
 		Socket /= unreach->
-			io:format("[discovery_system] accepted ~p~n", [IP])
+			io:format("[discovery_system] accepted ~p~n", [IP]);
+		true -> ok
 	end,
 	% need to send Socket up
 	{next_state, active, State};
@@ -57,7 +57,8 @@ handle_cast({hello_ack, IP, Port}, State) ->
 	Socket = connect_tcp(IP, Port, ?MAX_TRIES),
 	if
 		Socket /= unreach->
-			io:format("[discovery_system] new connection to ~p~n", [IP])
+			io:format("[discovery_system] new connection to ~p~n", [IP]);
+		true -> ok
 	end,
 	% need to send Socket up
 	{next_state, active, State}.	
@@ -85,5 +86,5 @@ connect_tcp(IP, Port, Try) ->
 	end.
 
 my_ip() -> 
-	{ok, [{addr, IP}]} = inet:ifget("eth0", [addr]),
+	{ok, [{addr, IP}]} = inet:ifget("eth1", [addr]),
 	IP.

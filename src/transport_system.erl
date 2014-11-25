@@ -6,7 +6,7 @@
 
 %%% Client API
 start_link() ->
-	{ok, Socket} = gen_udp:open(?TRANSPORT_UDP_PORT, [binary, {active, false}]),
+	{ok, Socket} = gen_udp:open(?TRANSPORT_UDP_PORT, [binary, {active, false}, {broadcast, true}, {multicast_loop, false}]),
 	Pid = spawn_link(?MODULE, init, [Socket]),
 	register(?MODULE, Pid).
 
@@ -27,12 +27,12 @@ loop(Socket) ->
 
 broadcast(Msg) ->
 	Socket = get_random_port_udp_socket(),
-	gen_udp:send(Socket, {255,255,255,255}, ?TRANSPORT_UDP_PORT, Msg),
+	gen_udp:send(Socket, {255,255,255,255}, ?TRANSPORT_UDP_PORT, term_to_binary(Msg)),
 	gen_udp:close(Socket).
 
 unreliable_unicast(IP, Msg) ->
 	Socket = get_random_port_udp_socket(),
-	gen_udp:send(Socket, IP, ?TRANSPORT_UDP_PORT, Msg),
+	gen_udp:send(Socket, IP, ?TRANSPORT_UDP_PORT, term_to_binary(Msg)),
 	gen_udp:close(Socket).
 
 get_random_port_udp_socket() -> 
