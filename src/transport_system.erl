@@ -15,9 +15,9 @@ init(Arg) -> loop(Arg).
 loop(Socket) ->
 	Message = gen_udp:recv(Socket, 0),
 	case Message of
-		{ok, {Addr, Port, Packet}} ->
+		{ok, {_Addr, _Port, Packet}} ->
 			Payload = binary_to_term(Packet),
-			gen_server:cast(dfs_server, {{Addr, Port}, Payload});
+			gen_server:cast(discovery_system, Payload);
 			%io:format("sent cast~sn", [atom_to_list(Payload)]);
 		{error, _Reason} -> ok
 			% need to log this later
@@ -25,5 +25,21 @@ loop(Socket) ->
 	loop(Socket).
 
 broadcast(Msg) ->
-	{ok, Socket} = gen_udp:open(?TRANSPORT_UDP_PORT, [binary, {active, false}]),
+	Socket = get_random_port_socket(),
+	gen_udp:send(Socket, {255,255,255,255}, ?TRANSPORT_UDP_PORT, Msg),
 	gen_udp:close(Socket).
+
+unreliable_unicast(IP, Msg) ->
+	Socket = get_random_port_socket(),
+	gen_udp:send(Socket, IP, ?TRANSPORT_UDP_PORT, Msg),
+	gen_udp:close(Socket).
+	
+
+get_random_port_socket() -> 
+	Ans = gen_udp:open(random:uniform(48127) + 1024, [binary, {broadcast, true}]),
+	case Ans of
+		{ok, Socket} ->
+			Socket;
+		_Error ->
+			get_random_port_socket()
+	end.
