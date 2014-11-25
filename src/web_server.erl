@@ -89,8 +89,10 @@ get_request(Socket) ->
 	re:split(binary_to_list(Resp),"\r\n",[{return,list}, trim]).
 
 get_info(Socket, Req) ->
+	%io:format("~p~n~n", [Req]),
 	if
 		length(Req) < 19 ->
+			%io:format("more~n~n"),
 			Next_Part = get_request(Socket),
 			get_info(Socket, Req ++ Next_Part);
 		true ->
@@ -104,7 +106,7 @@ get_boundery(Req) ->
 	string:substr(Bound_F, Eq_Index+1).
 
 get_filename(Req) ->
-	Temp = lists:nth(3, re:split(lists:nth(17,Req), ";", [{return,list}, trim])),
+	Temp = lists:nth(3, re:split(lists:nth(18,Req), ";", [{return,list}, trim])),
 	lists:nth(2, re:split(Temp, "\"", [{return,list},trim])).
 
 get_file(Socket, Boundery) ->
