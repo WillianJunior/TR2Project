@@ -1,5 +1,6 @@
 -module(transport_system).
--export([start_link/0, init/1, broadcast/1]).
+-export([start_link/0, init/1, broadcast/1, get_random_port_udp_socket/0, 
+	unreliable_unicast/2, get_random_port_tcp_listen_socket/0]).
 
 -define (TRANSPORT_UDP_PORT, 8678).
 
@@ -25,21 +26,32 @@ loop(Socket) ->
 	loop(Socket).
 
 broadcast(Msg) ->
-	Socket = get_random_port_socket(),
+	Socket = get_random_port_udp_socket(),
 	gen_udp:send(Socket, {255,255,255,255}, ?TRANSPORT_UDP_PORT, Msg),
 	gen_udp:close(Socket).
 
 unreliable_unicast(IP, Msg) ->
-	Socket = get_random_port_socket(),
+	Socket = get_random_port_udp_socket(),
 	gen_udp:send(Socket, IP, ?TRANSPORT_UDP_PORT, Msg),
 	gen_udp:close(Socket).
-	
 
-get_random_port_socket() -> 
-	Ans = gen_udp:open(random:uniform(48127) + 1024, [binary, {broadcast, true}]),
+get_random_port_udp_socket() -> 
+	Ans = gen_udp:open(get_random_port(), [binary, {broadcast, true}]),
 	case Ans of
 		{ok, Socket} ->
 			Socket;
 		_Error ->
-			get_random_port_socket()
+			get_random_port_udp_socket()
 	end.
+
+get_random_port_tcp_listen_socket() ->
+	Ans = gen_tcp:listen(get_random_port(), []),
+	case Ans of
+		{ok, Socket} ->
+			Socket;
+		_Error ->
+			get_random_port_tcp_listen_socket()
+	end.	
+
+get_random_port() -> 
+	random:uniform(48127) + 1024.
