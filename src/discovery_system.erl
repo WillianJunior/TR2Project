@@ -43,7 +43,7 @@ handle_cast({hello, IP}, State) ->
 	Me = transport_system:my_ip(),
 	if
 		IP =/= Me ->
-			gen_server:cast(control_system, {new_server_passive}),
+			gen_server:cast(control_system, {new_server_passive});
 		true -> ok
 	end,
 	{noreply, State};

@@ -4,6 +4,9 @@
 	multicast_tcp_list/2, accept_tcp/2, connect_tcp/3]).
 
 -define (TRANSPORT_UDP_PORT, 8678).
+-define (RED_MSGS, 3).
+-define (TIMEOUT, 1000). % in milliseconds
+-define (MAX_TRIES, 5).
 
 %%% Client API
 start_link() ->
