@@ -17,6 +17,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 handle_info({tcp, _Port, Msg}, S) -> 
 	io:format("received: ~p~n", [Msg]),
+	gen_server:cast(control_system, Msg),
 	{noreply, S}.
 
 handle_call(flush, _From, State) ->
@@ -32,7 +33,31 @@ terminate(_Reason, _State) -> ok.
 
 %%%%%%%%%%% New Server Subprotocol %%%%%%%%%%%%
 
-handle_cast({new_server, Socket, IP}, {Files, Servers}) ->
+handle_cast({new_server_passive, IP}, {Files, Servers}) ->
+	io:format("[control_system] new_server_passive"),
+	Listener = transport_system:get_random_port_tcp_listen_socket(),
+	{ok, Port} = inet:port(Listener),
+	transport_system:unreliable_unicast(IP, 
+		{hello_ack, transport_system:my_ip(), Port}),
+	Socket = transport_system:accept_tcp(Listener, ?MAX_TRIES),
+	if
+		Socket /= unreach->
+			io:format("[control_system] accepted connection  to ~p~n", [IP]);
+		true -> ok
+	end,
+	New_Servers = Servers ++ [{0, IP, Socket}],
+	New_Servers_Sorted = lists:sort(New_Servers),
+	{noreply, {Files, New_Servers_Sorted}};
+
+handle_cast({new_server_active, IP, Port}, {Files, Servers}) ->
+	io:format("[control_system] new_server_active"),
+	Socket = transport_system:connect_tcp(IP, Port, ?MAX_TRIES),
+	if
+		Socket /= unreach->
+			io:format("[control_system] new connection to ~p~n", [IP]),
+			gen_server:cast(control_system, {new_server, Socket, IP});
+		true -> ok
+	end,
 	New_Servers = Servers ++ [{0, IP, Socket}],
 	New_Servers_Sorted = lists:sort(New_Servers),
 	{noreply, {Files, New_Servers_Sorted}};

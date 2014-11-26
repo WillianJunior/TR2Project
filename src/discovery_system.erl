@@ -43,56 +43,15 @@ handle_cast({hello, IP}, State) ->
 	Me = transport_system:my_ip(),
 	if
 		IP =/= Me ->
-			Listener = transport_system:get_random_port_tcp_listen_socket(),
-			{ok, Port} = inet:port(Listener),
-			transport_system:unreliable_unicast(IP, 
-				{hello_ack, transport_system:my_ip(), Port}),
-			Socket = accept_tcp(Listener, ?MAX_TRIES),
-			if
-				Socket /= unreach->
-					io:format("[discovery_system] accepted ~p~n", [IP]),
-					% send Socket to control_system
-					gen_server:cast(control_system, {new_server, Socket, IP});
-				true -> ok
-			end;
+			gen_server:cast(control_system, {new_server_passive}),
 		true -> ok
 	end,
 	{noreply, State};
 
 handle_cast({hello_ack, IP, Port}, State) ->
 	io:format("got hello_ack~n"),
-	Socket = connect_tcp(IP, Port, ?MAX_TRIES),
-	if
-		Socket /= unreach->
-			io:format("[discovery_system] new connection to ~p~n", [IP]),
-			gen_server:cast(control_system, {new_server, Socket, IP});
-		true -> ok
-	end,
+	gen_server:cast(control_system, {new_server_active, IP, Port}),
 	{noreply, State};
 
 handle_cast(_Other, State) ->
 	{noreply, State}.
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%% TCP Helper Functions %%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-accept_tcp(_, 0) -> unreach;
-accept_tcp(Listener, Try) ->
-	R = gen_tcp:accept(Listener, ?TIMEOUT),
-	case R of
-		{ok, Socket} ->
-			Socket;
-		_Otherwise ->
-			accept_tcp(Listener, Try-1)
-	end.
-
-connect_tcp(_, _, 0) -> unreach;
-connect_tcp(IP, Port, Try) ->
-	R = gen_tcp:connect(IP, Port, [], ?TIMEOUT),
-	case R of
-		{ok, Socket} ->
-			Socket;
-		_Otherwise ->
-			connect_tcp(IP, Port, Try-1)
-	end.

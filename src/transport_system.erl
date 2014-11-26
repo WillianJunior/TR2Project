@@ -1,7 +1,7 @@
 -module(transport_system).
 -export([start_link/0, init/1, broadcast/1, get_random_port_udp_socket/0, 
 	unreliable_unicast/2, get_random_port_tcp_listen_socket/0, my_ip/0, 
-	multicast_tcp_list/2]).
+	multicast_tcp_list/2, accept_tcp/2, connect_tcp/3]).
 
 -define (TRANSPORT_UDP_PORT, 8678).
 
@@ -28,12 +28,21 @@ loop(Socket) ->
 	end,
 	loop(Socket).
 
-multicast_tcp_list([], _) -> ok;
-multicast_tcp_list([lo|SL], Msg) ->
-	multicast_tcp_list(SL, Msg);
-multicast_tcp_list([Socket|SL], Msg) ->
-	gen_tcp:send(Socket, term_to_binary(Msg)),
-	multicast_tcp_list(SL, Msg).
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%% Transport Helper Functions %%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+get_random_port() -> 
+	random:uniform(48127) + 1024.
+
+my_ip() -> 
+	{ok, [{addr, IP}]} = inet:ifget("eth0", [addr]),
+	IP.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%% UDP Helper Functions %%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 broadcast(Msg) ->
 	Socket = get_random_port_udp_socket(),
@@ -56,6 +65,17 @@ get_random_port_udp_socket() ->
 			get_random_port_udp_socket()
 	end.
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%% TCP Helper Functions %%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+multicast_tcp_list([], _) -> ok;
+multicast_tcp_list([lo|SL], Msg) ->
+	multicast_tcp_list(SL, Msg);
+multicast_tcp_list([Socket|SL], Msg) ->
+	gen_tcp:send(Socket, term_to_binary(Msg)),
+	multicast_tcp_list(SL, Msg).
+
 get_random_port_tcp_listen_socket() ->
 	Ans = gen_tcp:listen(get_random_port(), []),
 	case Ans of
@@ -65,9 +85,22 @@ get_random_port_tcp_listen_socket() ->
 			get_random_port_tcp_listen_socket()
 	end.	
 
-get_random_port() -> 
-	random:uniform(48127) + 1024.
+accept_tcp(_, 0) -> unreach;
+accept_tcp(Listener, Try) ->
+	R = gen_tcp:accept(Listener, ?TIMEOUT),
+	case R of
+		{ok, Socket} ->
+			Socket;
+		_Otherwise ->
+			accept_tcp(Listener, Try-1)
+	end.
 
-my_ip() -> 
-	{ok, [{addr, IP}]} = inet:ifget("eth0", [addr]),
-	IP.
+connect_tcp(_, _, 0) -> unreach;
+connect_tcp(IP, Port, Try) ->
+	R = gen_tcp:connect(IP, Port, [], ?TIMEOUT),
+	case R of
+		{ok, Socket} ->
+			Socket;
+		_Otherwise ->
+			connect_tcp(IP, Port, Try-1)
+	end.
