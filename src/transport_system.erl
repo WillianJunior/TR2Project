@@ -37,7 +37,8 @@ multicast_tcp_list([Socket|SL], Msg) ->
 
 broadcast(Msg) ->
 	Socket = get_random_port_udp_socket(),
-	gen_udp:send(Socket, {255,255,255,255}, ?TRANSPORT_UDP_PORT, term_to_binary(Msg)),
+	gen_udp:send(Socket, {255,255,255,255}, ?TRANSPORT_UDP_PORT, 
+		term_to_binary(Msg)),
 	gen_udp:close(Socket).
 
 unreliable_unicast(IP, Msg) ->
@@ -46,7 +47,8 @@ unreliable_unicast(IP, Msg) ->
 	gen_udp:close(Socket).
 
 get_random_port_udp_socket() -> 
-	Ans = gen_udp:open(get_random_port(), [binary, {broadcast, true}]),
+	Ans = gen_udp:open(get_random_port(), [binary, {active, false}, 
+		{broadcast, true}]),
 	case Ans of
 		{ok, Socket} ->
 			Socket;
@@ -55,7 +57,7 @@ get_random_port_udp_socket() ->
 	end.
 
 get_random_port_tcp_listen_socket() ->
-	Ans = gen_tcp:listen(get_random_port(), []),
+	Ans = gen_tcp:listen(get_random_port(), [binary, {active, false}]),
 	case Ans of
 		{ok, Socket} ->
 			Socket;

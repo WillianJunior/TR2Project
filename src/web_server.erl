@@ -109,7 +109,7 @@ get_boundery(Req) ->
 	string:substr(Bound_F, Eq_Index+1).
 
 get_filename(Req) ->
-	Temp = lists:nth(3, re:split(lists:nth(18,Req), ";", [{return,list}, trim])),
+	Temp = lists:nth(3, re:split(lists:nth(17,Req), ";", [{return,list}, trim])),
 	lists:nth(2, re:split(Temp, "\"", [{return,list},trim])).
 
 get_file(Socket, Boundery) ->

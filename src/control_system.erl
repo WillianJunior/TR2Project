@@ -31,39 +31,51 @@ terminate(_Reason, _State) -> ok.
 %%%%%%%%%%% New Server Subprotocol %%%%%%%%%%%%
 
 handle_cast({new_server, Socket, IP}, {Files, Servers}) ->
-	New_Servers = Servers ++ {0, IP, Socket},
+	New_Servers = Servers ++ [{0, IP, Socket}],
 	New_Servers_Sorted = lists:sort(New_Servers),
 	{noreply, {Files, New_Servers_Sorted}};
 
 %%%%%%%%%%%% New File Subprotocol %%%%%%%%%%%%%
 
 handle_cast({new_file, Filename}, {Files, Servers}) ->
+	io:format("[control_system] new_file~n"),
 	% send new descriptors to all servers
 	Desc_Msg = term_to_binary({new_descriptor, Filename}),
-	Desc_Sockets = lists:map(fun ({_A,_B,C}) -> C end, Servers),
+	Desc_Sockets_Temp = lists:map(fun ({_A,_B,C}) -> C end, Servers),
+	Desc_Sockets = lists:delete(lo, Desc_Sockets_Temp),
 	lists:map(fun (Socket) -> gen_tcp:send(Socket, Desc_Msg) end, Desc_Sockets),
 
 	% upload files
 	% TODO: support 1 live server
-	Upload_Sockets = [lists:nth(1, Servers), lists:nth(2, Servers)],
+	Upload_Sockets_Temp = lists:map(fun ({_A,_B,C}) -> C end, Servers),
+	Upload_Sockets = [lists:nth(1, Upload_Sockets_Temp), 
+		lists:nth(2, Upload_Sockets_Temp)],
 	Lo_List = lists:map(fun (Socket) -> upload_file(Socket, Filename) end, 
 		Upload_Sockets),
 	Got_Lo = lists:foldr(fun (A,B) -> A or B end, false, Lo_List),
 	if
 		not Got_Lo ->
-			file:delete("./files/" ++ Filename);
-		true -> ok
+			file:delete("./files/" ++ Filename),
+			New_Location = [];
+		true -> 
+			New_Location = [here]
 	end,
-	{noreply, {Files, Servers}};
+
+	% add new descriptor locally
+	New_Files = Files ++ [{Filename, New_Location}],
+
+	{noreply, {New_Files, Servers}};
 
 handle_cast({new_descriptor, Filename}, {Files, Servers}) ->
-	New_Files = Files ++ {Filename, []},
+	io:format("[control_system] new_descriptor~n"),
+	New_Files = Files ++ [{Filename, []}],
 	{noreply, {New_Files, Servers}};
 
 handle_cast({upload_file, Filename, From}, {Files, Servers}) ->
+	io:format("[control_system] upload_file~n"),
 	% add self location to the file descriptors' list
 	{_, Locations} = lists:keyfind(Filename, 1, Files),
-	New_Files = lists:keyreplace(Filename, 1, Files, {Filename, Locations ++ here}),
+	New_Files = lists:keyreplace(Filename, 1, Files, {Filename, Locations ++ [here]}),
 
 	% update file count
 	{Count, My_IP, lo} = lists:keyfind(transport_system:my_ip(), 2, Servers),
@@ -81,9 +93,10 @@ handle_cast({upload_file, Filename, From}, {Files, Servers}) ->
 	{noreply, {New_Servers, New_Files}};
 
 handle_cast({update_file_ref, Filename, IP}, {Files, Servers}) ->
+	io:format("[control_system] update_file_ref~n"),
 	% add self location to the file descriptors' list
 	{_, Locations} = lists:keyfind(Filename, 1, Files),
-	New_Files = lists:keyreplace(Filename, 1, Files, {Filename, Locations ++ IP}),
+	New_Files = lists:keyreplace(Filename, 1, Files, {Filename, Locations ++ [IP]}),
 
 	% increment file counter
 
@@ -92,6 +105,7 @@ handle_cast({update_file_ref, Filename, IP}, {Files, Servers}) ->
 %%%%%%%%%%% Discard other messages %%%%%%%%%%%%
 
 handle_cast(_Other, State) ->
+	io:format("[control_system] discarting~n"),
 	{noreply, State}.
 
 
@@ -102,5 +116,6 @@ upload_file(Socket, Filename) ->
 		_S ->
 			gen_tcp:send(Socket, {upload_file, Filename, transport_system:my_ip()}),
 			{ok, File} = file:read_file("./files/" ++ Filename),
-			gen_tcp:send(Socket, File)
+			gen_tcp:send(Socket, File),
+			false
 	end.

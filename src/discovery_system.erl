@@ -89,7 +89,7 @@ accept_tcp(Listener, Try) ->
 
 connect_tcp(_, _, 0) -> unreach;
 connect_tcp(IP, Port, Try) ->
-	R = gen_tcp:connect(IP, Port, [], ?TIMEOUT),
+	R = gen_tcp:connect(IP, Port, [binary, {active, false}], ?TIMEOUT),
 	case R of
 		{ok, Socket} ->
 			Socket;
