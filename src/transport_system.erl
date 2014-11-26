@@ -1,7 +1,7 @@
 -module(transport_system).
 -export([start_link/0, init/1, broadcast/1, get_random_port_udp_socket/0, 
-	unreliable_unicast/2, get_random_port_tcp_listen_socket/0, my_ip/0, 
-	multicast_tcp_list/2, accept_tcp/2, connect_tcp/3]).
+	unreliable_unicast/2, get_random_port_tcp_listen_socket/1, my_ip/0, 
+	multicast_tcp_list/2, accept_tcp/2, connect_tcp/4]).
 
 -define (TRANSPORT_UDP_PORT, 8678).
 -define (RED_MSGS, 3).
@@ -84,13 +84,13 @@ multicast_tcp_list([Socket|SL], Msg) ->
 	gen_tcp:send(Socket, Msg),
 	multicast_tcp_list(SL, Msg).
 
-get_random_port_tcp_listen_socket() ->
-	Ans = gen_tcp:listen(get_random_port(), [binary]),
+get_random_port_tcp_listen_socket(Args) ->
+	Ans = gen_tcp:listen(get_random_port(), [binary] ++ Args),
 	case Ans of
 		{ok, Socket} ->
 			Socket;
 		_Error ->
-			get_random_port_tcp_listen_socket()
+			get_random_port_tcp_listen_socket(Args)
 	end.	
 
 accept_tcp(_, 0) -> unreach;
@@ -103,12 +103,12 @@ accept_tcp(Listener, Try) ->
 			accept_tcp(Listener, Try-1)
 	end.
 
-connect_tcp(_, _, 0) -> unreach;
-connect_tcp(IP, Port, Try) ->
-	R = gen_tcp:connect(IP, Port, [binary], ?TIMEOUT),
+connect_tcp(_, _, _, 0) -> unreach;
+connect_tcp(IP, Port, Args, Try) ->
+	R = gen_tcp:connect(IP, Port, [binary] ++ Args, ?TIMEOUT),
 	case R of
 		{ok, Socket} ->
 			Socket;
 		_Otherwise ->
-			connect_tcp(IP, Port, Try-1)
+			connect_tcp(IP, Port, Args, Try-1)
 	end.

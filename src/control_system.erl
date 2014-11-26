@@ -51,7 +51,7 @@ terminate(_Reason, _State) -> ok.
 
 handle_cast({new_server_passive, IP}, {Files, Servers}) ->
 	io:format("[control_system] new_server_passive"),
-	Listener = transport_system:get_random_port_tcp_listen_socket(),
+	Listener = transport_system:get_random_port_tcp_listen_socket([]),
 	{ok, Port} = inet:port(Listener),
 	transport_system:unreliable_unicast(IP, 
 		{hello_ack, transport_system:my_ip(), Port}),
@@ -67,7 +67,7 @@ handle_cast({new_server_passive, IP}, {Files, Servers}) ->
 
 handle_cast({new_server_active, IP, Port}, {Files, Servers}) ->
 	io:format("[control_system] new_server_active"),
-	Socket = transport_system:connect_tcp(IP, Port, ?MAX_TRIES),
+	Socket = transport_system:connect_tcp(IP, Port, [], ?MAX_TRIES),
 	if
 		Socket /= unreach->
 			io:format("[control_system] new connection to ~p~n", [IP]);
@@ -129,7 +129,7 @@ handle_cast({new_descriptor, Filename}, {Files, Servers}) ->
 handle_cast({upload_file, Filename, IP, Port}, {Files, Servers}) ->
 	io:format("[control_system] upload_file~n"),
 	% open a tcp connection for file transfer
-	Socket = transport_system:connect_tcp(IP, Port, ?MAX_TRIES),
+	Socket = transport_system:connect_tcp(IP, Port, [{active,false}], ?MAX_TRIES),
 
 	% add self location to the file descriptors' list
 	{_, Locations} = lists:keyfind(Filename, 1, Files),
@@ -178,7 +178,7 @@ upload_file(Socket, Filename) ->
 			true;
 		_S ->
 			% get a tcp listener for file transfer
-			Listener = transport_system:get_random_port_tcp_listen_socket(),
+			Listener = transport_system:get_random_port_tcp_listen_socket([{active, false}]),
 			
 			% send call for destination
 			{ok, Port} = inet:port(Listener),
