@@ -15,7 +15,9 @@ init(_) ->
 code_change(_OldVsn, State, _Extra) ->
 	{ok, State}.
 
-handle_info(_I, S) -> {noreply, S}.
+handle_info({tcp, _Port, Msg}, S) -> 
+	io:format("received: ~p~n", [Msg]),
+	{noreply, S}.
 
 handle_call(flush, _From, State) ->
 	{reply, State, State};
@@ -40,10 +42,12 @@ handle_cast({new_server, Socket, IP}, {Files, Servers}) ->
 handle_cast({new_file, Filename}, {Files, Servers}) ->
 	io:format("[control_system] new_file~n"),
 	% send new descriptors to all servers
-	Desc_Msg = term_to_binary({new_descriptor, Filename}),
+	Desc_Msg = {new_descriptor, Filename},
 	Desc_Sockets_Temp = lists:map(fun ({_A,_B,C}) -> C end, Servers),
 	Desc_Sockets = lists:delete(lo, Desc_Sockets_Temp),
-	lists:map(fun (Socket) -> gen_tcp:send(Socket, Desc_Msg) end, Desc_Sockets),
+	Out = lists:map(fun (Socket) -> gen_tcp:send(Socket, Desc_Msg) end, 
+		Desc_Sockets),
+	io:format("out: ~p~n~n", [Out]),
 
 	% upload files
 	% TODO: support 1 live server
@@ -114,7 +118,9 @@ upload_file(Socket, Filename) ->
 		lo ->
 			true;
 		_S ->
-			gen_tcp:send(Socket, {upload_file, Filename, transport_system:my_ip()}),
+			Out = gen_tcp:send(Socket, {upload_file, 
+				Filename, transport_system:my_ip()}),
+			io:format("out2: ~p~n", [Out]),
 			{ok, File} = file:read_file("./files/" ++ Filename),
 			gen_tcp:send(Socket, File),
 			false

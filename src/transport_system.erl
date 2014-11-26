@@ -13,7 +13,7 @@ start_link() ->
 	register(?MODULE, Pid).
 
 %%% Server Functions
-init(Arg) -> loop(Arg).
+init(Socket) -> loop(Socket).
 	
 loop(Socket) ->
 	Message = gen_udp:recv(Socket, 0),
@@ -57,7 +57,7 @@ get_random_port_udp_socket() ->
 	end.
 
 get_random_port_tcp_listen_socket() ->
-	Ans = gen_tcp:listen(get_random_port(), [binary, {active, false}]),
+	Ans = gen_tcp:listen(get_random_port(), []),
 	case Ans of
 		{ok, Socket} ->
 			Socket;
