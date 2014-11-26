@@ -87,7 +87,6 @@ handle_cast({new_file, Filename}, {Files, Servers}) ->
 	Desc_Sockets = lists:delete(lo, Desc_Sockets_Temp),
 	Out = lists:map(fun (Socket) -> gen_tcp:send(Socket, Desc_Msg) end, 
 		Desc_Sockets),
-	io:format("out: ~p~n~n", [Out]),
 
 	% upload files
 	% TODO: support 1 live server
@@ -140,7 +139,7 @@ handle_cast({upload_file, Filename, IP, Port}, {Files, Servers}) ->
 	New_Servers = lists:keyreplace(My_IP, 2, Servers, {Count+1, My_IP, lo}),
 
 	% download file
-	File = gen_tcp:recv(Socket, 0),
+	{ok, File} = gen_tcp:recv(Socket, 0),
 	file:write_file("./files/" ++ Filename, File),
 
 	% close file transfer socket
@@ -184,7 +183,6 @@ upload_file(Socket, Filename) ->
 			{ok, Port} = inet:port(Listener),
 			Out = gen_tcp:send(Socket, term_to_binary({upload_file, 
 				Filename, transport_system:my_ip(), Port})),
-			io:format("out2: ~p~n", [Out]),
 
 			% wait for file transfer connection
 			File_Socket = transport_system:accept_tcp(Listener, ?MAX_TRIES),
