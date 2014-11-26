@@ -23,8 +23,7 @@ loop(Socket) ->
 	case Message of
 		{ok, {_Addr, _Port, Packet}} ->
 			Payload = binary_to_term(Packet),
-			gen_server:cast(discovery_system, Payload),
-			gen_server:cast(control_system, Payload);
+			gen_server:cast(discovery_system, Payload);
 			%io:format("sent cast~sn", [atom_to_list(Payload)]);
 		{error, _Reason} -> ok
 			% need to log this later

@@ -21,7 +21,6 @@ code_change(_OldVsn, State, _Extra) ->
 	{ok, State}.
 
 handle_info({tcp, _Port, Msg}, S) -> 
-	io:format("received: ~p~n", [Msg]),
 	gen_server:cast(control_system, binary_to_term(Msg)),
 	{noreply, S}.
 
@@ -104,8 +103,11 @@ handle_cast({new_descriptor, Filename}, {Files, Servers}) ->
 	New_Files = Files ++ [{Filename, []}],
 	{noreply, {New_Files, Servers}};
 
-handle_cast({upload_file, Filename, From}, {Files, Servers}) ->
+handle_cast({upload_file, Filename, IP, Port}, {Files, Servers}) ->
 	io:format("[control_system] upload_file~n"),
+	% open a tcp connection for file transfer
+	Socket = transport_system:connect_tcp(IP, Port, ?MAX_TRIES),
+
 	% add self location to the file descriptors' list
 	{_, Locations} = lists:keyfind(Filename, 1, Files),
 	New_Files = lists:keyreplace(Filename, 1, Files, {Filename, Locations ++ [here]}),
@@ -115,9 +117,11 @@ handle_cast({upload_file, Filename, From}, {Files, Servers}) ->
 	New_Servers = lists:keyreplace(My_IP, 2, Servers, {Count+1, My_IP, lo}),
 
 	% download file
-	{_Count, From, Socket} = lists:keyfind(From, 2, Servers),
 	File = gen_tcp:recv(Socket, 0),
 	file:write_file("./files/" ++ Filename, File),
+
+	% close file transfer socket
+	gen_tcp:close(Socket),
 
 	% send update to network
 	Update_Msg = term_to_binary({update_file_ref, Filename, 
@@ -148,11 +152,20 @@ upload_file(Socket, Filename) ->
 		lo ->
 			true;
 		_S ->
-			% open a tcp here for file transfer
+			% get a tcp listener for file transfer
+			Listener = transport_system:get_random_port_tcp_listen_socket(),
+			
+			% send call for destination
 			Out = gen_tcp:send(Socket, term_to_binary({upload_file, 
-				Filename, transport_system:my_ip()})),
+				Filename, transport_system:my_ip(), inet:port(Listener)})),
 			io:format("out2: ~p~n", [Out]),
+
+			% wait for file transfer connection
+			File_Socket = transport_system:accept_tcp(Listener, ?MAX_TRIES),
+			
+			% transfer file
 			{ok, File} = file:read_file("./files/" ++ Filename),
-			gen_tcp:send(Socket, File),
+			gen_tcp:send(File_Socket, File),
+			gen_tcp:close(File_Socket),
 			false
 	end.
