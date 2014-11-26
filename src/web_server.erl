@@ -74,6 +74,9 @@ answer_http_request(Socket) ->
 			% write file to a std dir
 			file:write_file("./files/" ++ Filename, list_to_binary(File)),
 
+			% pass add file process to control_system
+			gen_server:cast(control_system, {new_file, Filename}),
+
 			% send response
 			Status_Line = "HTTP/1.0 204 No Content" ++ ?CRLF,
 			Content_Type_Line = "Content-Type: " ++ ?CRLF ++ ?CRLF,
