@@ -7,7 +7,7 @@
 -define (RED_MSGS, 3).
 -define (TRANSPORT_UDP_PORT, 8678).
 -define (TIMEOUT, 1000). % in milliseconds
--define (MAX_TRIES, 5).
+-define (MAX_TRIES, 20).
 
 %%% Client API
 start_link(Arg) ->

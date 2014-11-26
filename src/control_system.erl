@@ -22,6 +22,10 @@ code_change(_OldVsn, State, _Extra) ->
 
 handle_info({tcp, _Port, Msg}, S) -> 
 	gen_server:cast(control_system, binary_to_term(Msg)),
+	{noreply, S};
+
+handle_info(Other, S) ->
+	io:format("info discart: ~p~n", [Other]),
 	{noreply, S}.
 
 handle_call(flush, _From, State) ->
@@ -156,8 +160,9 @@ upload_file(Socket, Filename) ->
 			Listener = transport_system:get_random_port_tcp_listen_socket(),
 			
 			% send call for destination
+			{ok, Port} = inet:port(Listener),
 			Out = gen_tcp:send(Socket, term_to_binary({upload_file, 
-				Filename, transport_system:my_ip(), inet:port(Listener)})),
+				Filename, transport_system:my_ip(), Port})),
 			io:format("out2: ~p~n", [Out]),
 
 			% wait for file transfer connection

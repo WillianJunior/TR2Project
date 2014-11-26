@@ -75,7 +75,7 @@ multicast_tcp_list([], _) -> ok;
 multicast_tcp_list([lo|SL], Msg) ->
 	multicast_tcp_list(SL, Msg);
 multicast_tcp_list([Socket|SL], Msg) ->
-	gen_tcp:send(Socket, term_to_binary(Msg)),
+	gen_tcp:send(Socket, Msg),
 	multicast_tcp_list(SL, Msg).
 
 get_random_port_tcp_listen_socket() ->
