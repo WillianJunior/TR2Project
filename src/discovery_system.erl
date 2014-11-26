@@ -39,11 +39,11 @@ handle_info(_I, S) -> {noreply, S}.
 handle_call(_R, _F, S) -> {noreply, S}.
 
 handle_cast({hello, IP}, State) ->
-	io:format("got hello~n"),
 	Me = transport_system:my_ip(),
 	if
 		IP =/= Me ->
-			gen_server:cast(control_system, {new_server_passive});
+			io:format("got hello~n"),
+			gen_server:cast(control_system, {new_server_passive, IP});
 		true -> ok
 	end,
 	{noreply, State};

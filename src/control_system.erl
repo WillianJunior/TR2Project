@@ -138,8 +138,8 @@ handle_cast({update_file_ref, Filename, IP}, {Files, Servers}) ->
 
 %%%%%%%%%%% Discard other messages %%%%%%%%%%%%
 
-handle_cast(_Other, State) ->
-	io:format("[control_system] discarting~n"),
+handle_cast(Other, State) ->
+	io:format("[control_system] discarting: ~p~n" [Other]),
 	{noreply, State}.
 
 
