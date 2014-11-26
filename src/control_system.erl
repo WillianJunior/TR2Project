@@ -89,18 +89,29 @@ handle_cast({new_file, Filename}, {Files, Servers}) ->
 	Lo_List = lists:map(fun (Socket) -> upload_file(Socket, Filename) end, 
 		Upload_Sockets),
 	Got_Lo = lists:foldr(fun (A,B) -> A or B end, false, Lo_List),
-	if
+	{New_Servers, New_Location} = if
 		not Got_Lo ->
 			file:delete("./files/" ++ Filename),
-			New_Location = [];
+			{Servers, []};
 		true -> 
-			New_Location = [here]
+			% send update message to network
+			Update_Msg = term_to_binary({update_file_ref, Filename, 
+			transport_system:my_ip()}),
+			Update_Sockets = lists:map(fun ({_A,_B,C}) -> C end, Servers),
+			transport_system:multicast_tcp_list(Update_Sockets, Update_Msg),
+
+			% update self counter of files
+			{Count, IP, Socket} = lists:keyfind(transport_system:my_ip(), 2, Servers),
+			New_S = lists:keyreplace(IP, 2, Servers, {Count+1, IP, Socket}),
+
+			% set updated location
+			{New_S, [here]}
 	end,
 
 	% add new descriptor locally
 	New_Files = Files ++ [{Filename, New_Location}],
 
-	{noreply, {New_Files, Servers}};
+	{noreply, {New_Files, New_Servers}};
 
 handle_cast({new_descriptor, Filename}, {Files, Servers}) ->
 	io:format("[control_system] new_descriptor~n"),
@@ -132,17 +143,19 @@ handle_cast({upload_file, Filename, IP, Port}, {Files, Servers}) ->
 		transport_system:my_ip()}),
 	Update_Sockets = lists:map(fun ({_A,_B,C}) -> C end, Servers),
 	transport_system:multicast_tcp_list(Update_Sockets, Update_Msg),
-	{noreply, {New_Servers, New_Files}};
+	{noreply, {New_Files, New_Servers}};
 
 handle_cast({update_file_ref, Filename, IP}, {Files, Servers}) ->
 	io:format("[control_system] update_file_ref~n"),
 	% add self location to the file descriptors' list
-	{_, Locations} = lists:keyfind(Filename, 1, Files),
+	{Filename, Locations} = lists:keyfind(Filename, 1, Files),
 	New_Files = lists:keyreplace(Filename, 1, Files, {Filename, Locations ++ [IP]}),
 
 	% increment file counter
+	{Count, IP, Socket} = lists:keyfind(IP, 2, Servers),
+	New_Servers = lists:keyreplace(IP, 2, Servers, {Count+1, IP, Socket}),
 
-	{noreply, {New_Files, Servers}};
+	{noreply, {New_Files, New_Servers}};
 
 %%%%%%%%%%% Discard other messages %%%%%%%%%%%%
 
