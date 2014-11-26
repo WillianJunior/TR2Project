@@ -4,23 +4,27 @@
 -export([init/1, code_change/3, terminate/2, handle_info/2, 
 	handle_cast/2, handle_call/3]).
 
--define (RED_MSGS, 3).
--define (TRANSPORT_UDP_PORT, 8678).
--define (TIMEOUT, 1000). % in milliseconds
--define (MAX_TRIES, 20).
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%% Client API %%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-%%% Client API
 start_link(Arg) ->
 	gen_server:start_link({local, discovery_system}, discovery_system, [Arg], []).
 
-%%% Server Functions
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%% Server Main Functions %%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 init(Arg) ->
 	F = lists:nth(1, Arg),
 	if
 		F /= first ->
+			io:format("[discovery_system] broadcasting hello~n"),
 			Msg = {hello, transport_system:my_ip()},
 			transport_system:broadcast(Msg);
-		true -> ok
+		true ->
+			io:format("[discovery_system] first server started~n"),
+			ok
 	end,
 	{ok, []}.
 
@@ -34,24 +38,32 @@ terminate(_Reason, _State) -> ok.
 %%%%%%%%%% Client Functions Handlers %%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-handle_info(_I, S) -> {noreply, S}.
+handle_info(I, S) -> 
+	io:format("[discovery_system] discarted info: ~p~n", [I]),
+	{noreply, S}.
 
-handle_call(_R, _F, S) -> {noreply, S}.
+handle_call(R, _F, S) -> 
+	io:format("[discovery_system] discarted call: ~p~n", [R]),
+	{noreply, S}.
 
 handle_cast({hello, IP}, State) ->
+	io:format("[discovery_system] got hello...~n"),
 	Me = transport_system:my_ip(),
 	if
 		IP =/= Me ->
-			io:format("got hello~n"),
+			io:format("[discovery_system] ...from ~p~n", [IP]),
 			gen_server:cast(control_system, {new_server_passive, IP});
-		true -> ok
+		true -> 
+			io:format("[discovery_system] ...from myself :'(~n"),
+			ok
 	end,
 	{noreply, State};
 
 handle_cast({hello_ack, IP, Port}, State) ->
-	io:format("got hello_ack~n"),
+	io:format("[discovery_system] got hello_ack~n"),
 	gen_server:cast(control_system, {new_server_active, IP, Port}),
 	{noreply, State};
 
-handle_cast(_Other, State) ->
+handle_cast(Other, State) ->
+	io:format("[discovery_system] discarted cast: ~p~n", [Other]),
 	{noreply, State}.

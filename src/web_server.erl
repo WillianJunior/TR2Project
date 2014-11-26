@@ -4,20 +4,25 @@
 -define (WEB_SERVER_PORT, 81).
 -define (CRLF, "\r\n").
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%% Client API %%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-%%% Client API
 start_link(Port) ->
 	{ok, ListenSocket} = gen_tcp:listen(Port, [{active, false}, binary]),
 	Pid = spawn_link(?MODULE, init, [ListenSocket]),
 	register(?MODULE, Pid).
 
-%%% Server Functions
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%% Server Main Functions %%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 init(Arg) -> 
 	loop(Arg).
 	
 loop(ListenSocket) ->
 	{ok, AcceptSocket} = gen_tcp:accept(ListenSocket),
-	io:format("received tcp connect~n"),
+	io:format("[web_server] received tcp request~n"),
 	spawn_link(?MODULE, answer_http_request, [AcceptSocket]),
 	loop(ListenSocket).
 
@@ -29,6 +34,7 @@ answer_http_request(Socket) ->
 	HTML_Filename = "./html/" ++ lists:nth(2, Request),
 	case Type of
 		"GET" ->
+			io:format("[web_server] received GET request~n"),
 			File = parse_html(HTML_Filename),
 			case File of
 				error ->
@@ -43,9 +49,10 @@ answer_http_request(Socket) ->
 					Reply = Status_Line ++ Content_Type_Line,
 					gen_tcp:send(Socket, Reply),
 					gen_tcp:send(Socket, File)
-				end;
+			end,
+			io:format("[web_server] finished GET request~n");
 		"POST" ->
-			io:format("post"),
+			io:format("[web_server] received POST request~n"),
 			%% assuming multipart/form-data always
 			% get boundery and filename
 			{Boundery, Filename, New_Resp_list} = get_info(Socket, Resp_List),
@@ -64,10 +71,10 @@ answer_http_request(Socket) ->
 			End = string:str(Last_Part, Boundery),
 			if
 				End =:= 0 ->
-					io:format("downloading the rest~n"),
+					io:format("[web_server] downloading the rest of the POST request~n"),
 					File = File_Start ++ get_file(Socket, Boundery);
 				true ->
-					io:format("more downloading not needed~n"),
+					io:format("[web_server] no more parts of the POST request needed~n"),
 					File = lists:reverse(tl(lists:reverse(File_Start)))
 			end,
 			
@@ -82,10 +89,15 @@ answer_http_request(Socket) ->
 			Content_Type_Line = "Content-Type: " ++ ?CRLF ++ ?CRLF,
 			Entity_Body = "",
 			Reply = Status_Line ++ Content_Type_Line ++ Entity_Body,
-			gen_tcp:send(Socket, list_to_binary(Reply))
+			gen_tcp:send(Socket, list_to_binary(Reply)),
+			io:format("[web_server] finished POST request~n")
 	end,
 	gen_tcp:close(Socket),
-	io:format("closed~n").
+	io:format("[web_server] request finished~n").
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%% Helper Functions %%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 get_request(Socket) ->
 	{ok, Resp} = gen_tcp:recv(Socket, 0),
@@ -142,4 +154,6 @@ parse_all_lines(Device) ->
 		Line -> parse_line(Line) ++ parse_all_lines(Device)
 	end.
 
+% TODO finish parse function to swap
+%   wildcards for file lines on the table
 parse_line(Line) -> Line.

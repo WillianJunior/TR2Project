@@ -8,16 +8,22 @@
 -define (TIMEOUT, 1000). % in milliseconds
 -define (MAX_TRIES, 5).
 
-%%% Client API
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%% Client API %%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 start_link() ->
 	{ok, Socket} = gen_udp:open(?TRANSPORT_UDP_PORT, [binary, {active, false}, 
 		{broadcast, true}]),
 	Pid = spawn_link(?MODULE, init, [Socket]),
 	register(?MODULE, Pid).
 
-%%% Server Functions
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%% Server Functions %%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 init(Socket) -> loop(Socket).
-	
+
 loop(Socket) ->
 	Message = gen_udp:recv(Socket, 0),
 	case Message of

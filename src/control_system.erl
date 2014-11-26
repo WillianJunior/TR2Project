@@ -9,11 +9,17 @@
 -define (TIMEOUT, 1000). % in milliseconds
 -define (MAX_TRIES, 5).
 
-%%% Client API
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%% Client API %%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 start_link() ->
 	gen_server:start_link({local, control_system}, control_system, [], []).
 
-%%% Server Functions
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%% Server Functions %%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 init(_) ->
 	{ok, {[], [{0, transport_system:my_ip(), lo}]}}.
 
@@ -25,12 +31,14 @@ handle_info({tcp, _Port, Msg}, S) ->
 	{noreply, S};
 
 handle_info(Other, S) ->
-	io:format("info discart: ~p~n", [Other]),
+	io:format("[control_system] info discarted: ~p~n", [Other]),
 	{noreply, S}.
 
 handle_call(flush, _From, State) ->
 	{reply, State, State};
-handle_call(_R, _F, S) -> {noreply, S}.
+handle_call(R, _F, S) -> 
+	io:format("[control_system] call discarted: ~p~n", [R]),
+	{noreply, S}.
 
 % send terminate data to a logger later...
 terminate(_Reason, _State) -> ok.
