@@ -23,7 +23,7 @@ loop(ListenSocket) ->
 
 answer_http_request(Socket) ->
 	Resp_List = get_request(Socket),
-	io:format("~p~n~n", [Resp_List]),
+	%io:format("~p~n~n", [Resp_List]),
 	Request = re:split(lists:nth(1, Resp_List), " ", [{return,list}, trim]),
 	Type = lists:nth(1, Request),
 	HTML_Filename = "./html/" ++ lists:nth(2, Request),
@@ -60,7 +60,7 @@ answer_http_request(Socket) ->
 
 			% get file if there is still some parts to receive
 			Last_Part = lists:last(New_Resp_list),
-			io:format("Last_Part = ~p~n~n", [Last_Part]),
+			%io:format("Last_Part = ~p~n~n", [Last_Part]),
 			End = string:str(Last_Part, Boundery),
 			if
 				End =:= 0 ->
@@ -115,7 +115,7 @@ get_filename(Req) ->
 get_file(Socket, Boundery) ->
 	{ok, Resp} = gen_tcp:recv(Socket, 0),
 	Resp_List = re:split(binary_to_list(Resp),"\r\n",[{return,list}, trim]),
-	io:format("post~n~p~n~n", [Resp_List]),
+	%io:format("post~n~p~n~n", [Resp_List]),
 	End = string:str(lists:last(Resp_List), Boundery),
 	if
 		End =:= 0 ->

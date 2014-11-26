@@ -22,7 +22,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 handle_info({tcp, _Port, Msg}, S) -> 
 	io:format("received: ~p~n", [Msg]),
-	gen_server:cast(control_system, Msg),
+	gen_server:cast(control_system, binary_to_term(Msg)),
 	{noreply, S}.
 
 handle_call(flush, _From, State) ->
@@ -59,8 +59,7 @@ handle_cast({new_server_active, IP, Port}, {Files, Servers}) ->
 	Socket = transport_system:connect_tcp(IP, Port, ?MAX_TRIES),
 	if
 		Socket /= unreach->
-			io:format("[control_system] new connection to ~p~n", [IP]),
-			gen_server:cast(control_system, {new_server, Socket, IP});
+			io:format("[control_system] new connection to ~p~n", [IP]);
 		true -> ok
 	end,
 	New_Servers = Servers ++ [{0, IP, Socket}],
@@ -72,7 +71,7 @@ handle_cast({new_server_active, IP, Port}, {Files, Servers}) ->
 handle_cast({new_file, Filename}, {Files, Servers}) ->
 	io:format("[control_system] new_file~n"),
 	% send new descriptors to all servers
-	Desc_Msg = {new_descriptor, Filename},
+	Desc_Msg = term_to_binary({new_descriptor, Filename}),
 	Desc_Sockets_Temp = lists:map(fun ({_A,_B,C}) -> C end, Servers),
 	Desc_Sockets = lists:delete(lo, Desc_Sockets_Temp),
 	Out = lists:map(fun (Socket) -> gen_tcp:send(Socket, Desc_Msg) end, 
@@ -121,7 +120,8 @@ handle_cast({upload_file, Filename, From}, {Files, Servers}) ->
 	file:write_file("./files/" ++ Filename, File),
 
 	% send update to network
-	Update_Msg = {update_file_ref, Filename, transport_system:my_ip()},
+	Update_Msg = term_to_binary({update_file_ref, Filename, 
+		transport_system:my_ip()}),
 	Update_Sockets = lists:map(fun ({_A,_B,C}) -> C end, Servers),
 	transport_system:multicast_tcp_list(Update_Sockets, Update_Msg),
 	{noreply, {New_Servers, New_Files}};
@@ -148,8 +148,9 @@ upload_file(Socket, Filename) ->
 		lo ->
 			true;
 		_S ->
-			Out = gen_tcp:send(Socket, {upload_file, 
-				Filename, transport_system:my_ip()}),
+			% open a tcp here for file transfer
+			Out = gen_tcp:send(Socket, term_to_binary({upload_file, 
+				Filename, transport_system:my_ip()})),
 			io:format("out2: ~p~n", [Out]),
 			{ok, File} = file:read_file("./files/" ++ Filename),
 			gen_tcp:send(Socket, File),

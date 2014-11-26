@@ -80,7 +80,7 @@ multicast_tcp_list([Socket|SL], Msg) ->
 	multicast_tcp_list(SL, Msg).
 
 get_random_port_tcp_listen_socket() ->
-	Ans = gen_tcp:listen(get_random_port(), []),
+	Ans = gen_tcp:listen(get_random_port(), [binary]),
 	case Ans of
 		{ok, Socket} ->
 			Socket;
@@ -100,7 +100,7 @@ accept_tcp(Listener, Try) ->
 
 connect_tcp(_, _, 0) -> unreach;
 connect_tcp(IP, Port, Try) ->
-	R = gen_tcp:connect(IP, Port, [], ?TIMEOUT),
+	R = gen_tcp:connect(IP, Port, [binary], ?TIMEOUT),
 	case R of
 		{ok, Socket} ->
 			Socket;
