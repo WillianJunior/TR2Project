@@ -156,27 +156,20 @@ get_info(Socket, Req) ->
 			Next_Part = get_request(Socket),
 			get_info(Socket, Req ++ Next_Part);
 		true ->
-			Boundery = get_boundery(Req),
-			Filename = get_filename(Req),
-			{Boundery, Filename, Req}
+			Boundary = get_field(Req, "boundary="),
+			%io:format("boundary: ~p~n", [Boundary]),
+			Filename_Temp = get_field(Req, "filename="),
+			Filename = string:sub_string(Filename_Temp, 2, length(Filename_Temp)-1),
+			%io:format("filename: ~p~n", [Filename]),
+			{Boundary, Filename, Req}
 	end.
 
-get_boundery(Req) -> 
-	Bound_all = re:split(lists:nth(9,Req), ";", [{return,list}, trim]),
-	%io:format("BA: ~p~n", [Bound_all]),
-	Bound_F = lists:nth(2, Bound_all),
-	%io:format("BF: ~p~n", [Bound_F]),
-	Eq_Index = string:chr(Bound_F, $=),
-	%io:format("Eq_Index: ~p~n", [Eq_Index]),
-	Final = string:substr(Bound_F, Eq_Index+1),
-	%io:format("Final: ~p~n", [Final]),
-	Final.
-
-get_filename(Req) ->
-	%io:format("1~n"),
-	Temp = lists:nth(3, re:split(lists:nth(13,Req), ";", [{return,list}, trim])),
-	%io:format("Temp: ~p~n", [Temp]),
-	lists:nth(2, re:split(Temp, "\"", [{return,list},trim])).
+get_field(Req, Field) -> 
+	Index_List = lists:map(fun (X) -> string:str(X, Field) end, Req),
+	Boundary_Index = lists:max(Index_List),
+	B_Temp_Index = index_of(Boundary_Index, Index_List),
+	Boundary_Temp = lists:nth(B_Temp_Index, Req),
+	string:sub_string(Boundary_Temp, Boundary_Index + length(Field), length(Boundary_Temp)).
 
 get_file(Socket, Boundery) ->
 	{ok, Resp} = gen_tcp:recv(Socket, 0),
@@ -189,6 +182,17 @@ get_file(Socket, Boundery) ->
 		true ->
 			lists:nth(1, Resp_List)
 	end.
+
+index_of(Item, List) -> index_of(Item, List, 1).
+
+index_of(_, [], _)  -> not_found;
+index_of(Item, [Item|_], Index) -> Index;
+index_of(Item, [_|Tl], Index) -> index_of(Item, Tl, Index+1).
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%% Parsing Functions %%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 parse_html(Filename, State) ->
 	{Status, Device} = file:open(Filename, [read]),
