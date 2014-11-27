@@ -13,12 +13,12 @@ start_link(Port) ->
  
 init(Port) ->
 	{ok, {{one_for_one, ?MAX_RESTART, ?MAX_TIME},
-		[{dfs_supervisor,
-			{dfs_supervisor, start_link, []},
-			transient, 1000, supervisor, [dfs_supervisor]},
-		{transport_system,
+		[{transport_system,
 			{transport_system, start_link, []},
 			transient, 1000, worker, [transport_system]},
+		{dfs_supervisor,
+			{dfs_supervisor, start_link, []},
+			transient, 1000, supervisor, [dfs_supervisor]},
 		{web_server,
 			{web_server, start_link, [Port]},
 			transient, 1000, worker, [web_server]}

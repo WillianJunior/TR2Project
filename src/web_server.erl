@@ -83,23 +83,23 @@ answer_http_request(Socket) ->
 		"POST" ->
 			io:format("[web_server] received POST request~n"),
 			%% assuming multipart/form-data always
-			% get boundery and filename
-			{Boundery, Filename, New_Resp_list} = get_info(Socket, Resp_List),
+			% get Boundary and filename
+			{Boundary, Filename, New_Resp_list, Content_Index} = get_info(Socket, Resp_List),
 			% get the start of the file from the last msg
 			if
-				length(New_Resp_list) > 19 ->
-					File_Start = lists:sublist(New_Resp_list,20,length(New_Resp_list)-19);
+				length(New_Resp_list) > Content_Index ->
+					File_Start = lists:sublist(New_Resp_list, Content_Index+1);
 				true ->
 					File_Start = []
 			end,
 			% get file if there is still some parts to receive
 			Last_Part = lists:last(New_Resp_list),
 			%io:format("Last_Part = ~p~n~n", [Last_Part]),
-			End = string:str(Last_Part, Boundery),
+			End = string:str(Last_Part, Boundary),
 			if
 				End =:= 0 ->
 					io:format("[web_server] downloading the rest of the POST request~n"),
-					File = File_Start ++ get_file(Socket, Boundery);
+					File = File_Start ++ get_file(Socket, Boundary);
 				true ->
 					io:format("[web_server] no more parts of the POST request needed~n"),
 					File = lists:reverse(tl(lists:reverse(File_Start)))
@@ -156,12 +156,12 @@ get_info(Socket, Req) ->
 			Next_Part = get_request(Socket),
 			get_info(Socket, Req ++ Next_Part);
 		true ->
-			Boundary = get_field(Req, "boundary="),
+			{Boundary, _} = get_field(Req, "boundary="),
 			%io:format("boundary: ~p~n", [Boundary]),
-			Filename_Temp = get_field(Req, "filename="),
+			{Filename_Temp, Content_Index} = get_field(Req, "filename="),
 			Filename = string:sub_string(Filename_Temp, 2, length(Filename_Temp)-1),
 			%io:format("filename: ~p~n", [Filename]),
-			{Boundary, Filename, Req}
+			{Boundary, Filename, Req, Content_Index}
 	end.
 
 get_field(Req, Field) -> 
@@ -169,16 +169,17 @@ get_field(Req, Field) ->
 	Boundary_Index = lists:max(Index_List),
 	B_Temp_Index = index_of(Boundary_Index, Index_List),
 	Boundary_Temp = lists:nth(B_Temp_Index, Req),
-	string:sub_string(Boundary_Temp, Boundary_Index + length(Field), length(Boundary_Temp)).
+	Boundary = string:sub_string(Boundary_Temp, Boundary_Index + length(Field), length(Boundary_Temp)),
+	{Boundary, B_Temp_Index}.
 
-get_file(Socket, Boundery) ->
+get_file(Socket, Boundary) ->
 	{ok, Resp} = gen_tcp:recv(Socket, 0),
 	Resp_List = re:split(binary_to_list(Resp),"\r\n",[{return,list}, trim]),
 	%io:format("post~n~p~n~n", [Resp_List]),
-	End = string:str(lists:last(Resp_List), Boundery),
+	End = string:str(lists:last(Resp_List), Boundary),
 	if
 		End =:= 0 ->
-			lists:nth(1, Resp_List) ++ get_file(Socket, Boundery);
+			lists:nth(1, Resp_List) ++ get_file(Socket, Boundary);
 		true ->
 			lists:nth(1, Resp_List)
 	end.
