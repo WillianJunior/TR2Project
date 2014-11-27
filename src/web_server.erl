@@ -1,6 +1,7 @@
 -module(web_server).
 -export([start_link/1, init/1, answer_http_request/1]).
--compile(export_all).
+-export([system_code_change/4, system_continue/3, 
+	system_terminate/4, write_debug/3]).
 -define (WEB_SERVER_PORT, 81).
 -define (CRLF, "\r\n").
 
@@ -10,21 +11,39 @@
 
 start_link(Port) ->
 	{ok, ListenSocket} = gen_tcp:listen(Port, [{active, false}, binary]),
-	Pid = spawn_link(?MODULE, init, [ListenSocket]),
-	register(?MODULE, Pid).
+	%Pid = spawn_link(?MODULE, init, [ListenSocket]),
+	%register(?MODULE, Pid).
+	proc_lib:start_link(?MODULE, init, [{self(), ListenSocket}]). 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%% Server Main Functions %%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init(Arg) -> 
-	loop(Arg).
+init({Parent, Socket}) -> 
+	io:format("[web_server] server started~n"),
+	register(?MODULE, self()),
+    Debug = sys:debug_options([]),
+    proc_lib:init_ack(Parent, {ok, self()}),
+    loop(Parent, Debug, Socket).
 	
-loop(ListenSocket) ->
-	{ok, AcceptSocket} = gen_tcp:accept(ListenSocket),
-	io:format("[web_server] received tcp request~n"),
-	spawn_link(?MODULE, answer_http_request, [AcceptSocket]),
-	loop(ListenSocket).
+loop(Parent, Debug, ListenSocket) ->
+	receive
+		{system, From, Request} ->
+			sys:handle_system_msg(Request, From, Parent, 
+				?MODULE, Debug, ListenSocket)
+	after
+		100 ->
+			ok
+	end,
+	Response = gen_tcp:accept(ListenSocket, 100),
+	case Response of
+		{ok, AcceptSocket} ->
+			io:format("[web_server] received tcp request~n"),
+			spawn_link(?MODULE, answer_http_request, [AcceptSocket]);
+		_R ->
+			ok
+	end,
+	loop(Parent, Debug, ListenSocket).
 
 answer_http_request(Socket) ->
 	Resp_List = get_request(Socket),
@@ -102,6 +121,25 @@ answer_http_request(Socket) ->
 	end,
 	gen_tcp:close(Socket),
 	io:format("[web_server] request finished~n").
+
+%% @doc Called by sys:handle_debug().  
+write_debug(Dev, Event, Name) ->  
+    io:format(Dev, "~p event = ~p~n", [Name, Event]).  
+  
+%% @doc http://www.erlang.org/doc/man/sys.html#Mod:system_continue-3  
+system_continue(Parent, Debug, State) ->  
+    io:format("Continue!~n"),  
+    loop(Parent, Debug, State).  
+  
+%% @doc http://www.erlang.org/doc/man/sys.html#Mod:system_terminate-4  
+system_terminate(Reason, _Parent, _Debug, _State) ->  
+    io:format("Terminate!~n"), 
+    exit(Reason).  
+  
+%% @doc http://www.erlang.org/doc/man/sys.html#Mod:system_code_change-4  
+system_code_change(State, _Module, _OldVsn, _Extra) ->  
+    io:format("Changed code!~n"),  
+    {ok, State}. 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%% Helper Functions %%%%%%%%%%%%%%

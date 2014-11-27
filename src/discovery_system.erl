@@ -16,6 +16,7 @@ start_link(Arg) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init(Arg) ->
+	io:format("[discovery_system] server started~n"),
 	F = lists:nth(1, Arg),
 	if
 		F /= first ->

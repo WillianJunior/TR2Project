@@ -2,6 +2,8 @@
 -export([start_link/0, init/1, broadcast/1, get_random_port_udp_socket/0, 
 	unreliable_unicast/2, get_random_port_tcp_listen_socket/1, my_ip/0, 
 	multicast_tcp_list/2, accept_tcp/2, connect_tcp/4]).
+-export([system_code_change/4, system_continue/3, 
+	system_terminate/4, write_debug/3]).  
 
 -define (TRANSPORT_UDP_PORT, 8678).
 -define (RED_MSGS, 3).
@@ -15,17 +17,32 @@
 start_link() ->
 	{ok, Socket} = gen_udp:open(?TRANSPORT_UDP_PORT, [binary, {active, false}, 
 		{broadcast, true}]),
-	Pid = spawn_link(?MODULE, init, [Socket]),
-	register(?MODULE, Pid).
+	%Pid = spawn_link(?MODULE, init, [Socket]),
+	%register(?MODULE, Pid).
+	proc_lib:start_link(?MODULE, init, [{self(), Socket}]).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%% Server Functions %%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init(Socket) -> loop(Socket).
+init({Parent, Socket}) -> 
+	io:format("[transport_system] server started~n"),
+	register(?MODULE, self()),  
+    Debug = sys:debug_options([]),  
+    proc_lib:init_ack(Parent, {ok, self()}),  
+    loop(Parent, Debug, Socket).
 
-loop(Socket) ->
-	Message = gen_udp:recv(Socket, 0),
+loop(Parent, Debug, Socket) ->
+	receive
+		{system, From, Request} ->
+			sys:handle_system_msg(Request, From, Parent, 
+				?MODULE, Debug, Socket)
+	after
+		100 ->
+			ok
+	end,
+
+	Message = gen_udp:recv(Socket, 0, 100),
 	case Message of
 		{ok, {_Addr, _Port, Packet}} ->
 			Payload = binary_to_term(Packet),
@@ -34,7 +51,26 @@ loop(Socket) ->
 		{error, _Reason} -> ok
 			% need to log this later
 	end,
-	loop(Socket).
+	loop(Parent, Debug, Socket).
+
+%% @doc Called by sys:handle_debug().  
+write_debug(Dev, Event, Name) ->  
+    io:format(Dev, "~p event = ~p~n", [Name, Event]).  
+  
+%% @doc http://www.erlang.org/doc/man/sys.html#Mod:system_continue-3  
+system_continue(Parent, Debug, State) ->  
+    io:format("Continue!~n"),  
+    loop(Parent, Debug, State).  
+  
+%% @doc http://www.erlang.org/doc/man/sys.html#Mod:system_terminate-4  
+system_terminate(Reason, _Parent, _Debug, _State) ->  
+    io:format("Terminate!~n"),  
+    exit(Reason).  
+  
+%% @doc http://www.erlang.org/doc/man/sys.html#Mod:system_code_change-4  
+system_code_change(State, _Module, _OldVsn, _Extra) ->  
+    io:format("Changed code!~n"),  
+    {ok, State}. 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%% Transport Helper Functions %%%%%%%%%

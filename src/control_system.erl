@@ -27,6 +27,7 @@ new_file(Filename) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 init(_) ->
+	io:format("[control_system] server started~n"),
 	{ok, {[], [{0, transport_system:my_ip(), lo}]}}.
 
 code_change(_OldVsn, State, _Extra) ->
