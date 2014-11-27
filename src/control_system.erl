@@ -1,7 +1,7 @@
 -module(control_system).
 -behaviour(gen_server).
 -export([start_link/0]).
--export([init/1, code_change/3, terminate/2, handle_info/2, 
+-export([init/1, get_state/0, new_file/1, code_change/3, terminate/2, handle_info/2, 
 	handle_cast/2, handle_call/3]).
 
 -define (RED_MSGS, 3).
@@ -15,6 +15,12 @@
 
 start_link() ->
 	gen_server:start_link({local, control_system}, control_system, [], []).
+
+get_state() ->
+	gen_server:call(control_system, flush).
+
+new_file(Filename) ->
+	gen_server:cast(control_system, {new_file, Filename}).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%% Server Functions %%%%%%%%%%%%%%

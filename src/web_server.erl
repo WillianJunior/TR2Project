@@ -1,6 +1,6 @@
 -module(web_server).
 -export([start_link/1, init/1, answer_http_request/1]).
-
+-compile(export_all).
 -define (WEB_SERVER_PORT, 81).
 -define (CRLF, "\r\n").
 
@@ -28,27 +28,37 @@ loop(ListenSocket) ->
 
 answer_http_request(Socket) ->
 	Resp_List = get_request(Socket),
-	%io:format("~p~n~n", [Resp_List]),
+	io:format("~p~n~n", [Resp_List]),
 	Request = re:split(lists:nth(1, Resp_List), " ", [{return,list}, trim]),
 	Type = lists:nth(1, Request),
-	HTML_Filename = "./html/" ++ lists:nth(2, Request),
 	case Type of
 		"GET" ->
 			io:format("[web_server] received GET request~n"),
-			File = parse_html(HTML_Filename),
-			case File of
-				error ->
-					Status_Line = "HTTP/1.0 404 Not Found" ++ ?CRLF,
-					Content_Type_Line = "Content-Type: text/html" ++ ?CRLF ++ ?CRLF,
-					Entity_Body = "<HTML><HEAD><TITLE>Not Found</TITLE></HEAD><BODY>Not Found</BODY></HTML>",
-					Reply = Status_Line ++ Content_Type_Line ++ Entity_Body,
-					gen_tcp:send(Socket, list_to_binary(Reply));
-				_ ->
-					Status_Line = "HTTP/1.0 200 OK" ++ ?CRLF,
-					Content_Type_Line = "Content-Type: text/html" ++ ?CRLF ++ ?CRLF,
-					Reply = Status_Line ++ Content_Type_Line,
-					gen_tcp:send(Socket, Reply),
-					gen_tcp:send(Socket, File)
+			Download_Token = string:chr(lists:nth(2, Request), $*),
+			if
+				Download_Token =:= 2 ->
+					% download request
+					io:format("[web_server] GET request is a download request~n");
+				true ->
+					% regular get html page
+					io:format("[web_server] GET request is a html page request~n"),
+					HTML_Filename = "./html" ++ lists:nth(2, Request),
+					State = control_system:get_state(),
+					File = parse_html(HTML_Filename, State),
+					case File of
+						error ->
+							Status_Line = "HTTP/1.0 404 Not Found" ++ ?CRLF,
+							Content_Type_Line = "Content-Type: text/html" ++ ?CRLF ++ ?CRLF,
+							Entity_Body = "<HTML><HEAD><TITLE>Not Found</TITLE></HEAD><BODY>Not Found</BODY></HTML>",
+							Reply = Status_Line ++ Content_Type_Line ++ Entity_Body,
+							gen_tcp:send(Socket, list_to_binary(Reply));
+						_ ->
+							Status_Line = "HTTP/1.0 200 OK" ++ ?CRLF,
+							Content_Type_Line = "Content-Type: text/html" ++ ?CRLF ++ ?CRLF,
+							Reply = Status_Line ++ Content_Type_Line,
+							gen_tcp:send(Socket, Reply),
+							gen_tcp:send(Socket, File)
+					end
 			end,
 			io:format("[web_server] finished GET request~n");
 		"POST" ->
@@ -82,7 +92,7 @@ answer_http_request(Socket) ->
 			file:write_file("./files/" ++ Filename, list_to_binary(File)),
 
 			% pass add file process to control_system
-			gen_server:cast(control_system, {new_file, Filename}),
+			control_system:new_file(Filename),
 
 			% send response
 			Status_Line = "HTTP/1.0 204 No Content" ++ ?CRLF,
@@ -136,11 +146,11 @@ get_file(Socket, Boundery) ->
 			lists:nth(1, Resp_List)
 	end.
 
-parse_html(Filename) ->
+parse_html(Filename, State) ->
 	{Status, Device} = file:open(Filename, [read]),
 	case Status of
 		ok ->
-			File = try parse_all_lines(Device)
+			File = try parse_all_lines(Device, State)
 				after file:close(Device)
 			end,
 			File;
@@ -148,12 +158,61 @@ parse_html(Filename) ->
 			Status
 	end.
 
-parse_all_lines(Device) ->
+parse_all_lines(Device, State) ->
 	case io:get_line(Device, "") of
 		eof -> [];
-		Line -> parse_line(Line) ++ parse_all_lines(Device)
+		Line -> parse_line(Line, State) ++ parse_all_lines(Device, State)
 	end.
 
 % TODO finish parse function to swap
 %   wildcards for file lines on the table
-parse_line(Line) -> Line.
+parse_line(Line, {Files, Servers}) ->
+	Files_Wildcard = string:str(Line, "??"),
+	Servers_Wildcard = string:str(Line, "##"),
+	if
+		Files_Wildcard =/= 0 ->
+			loop(fun file_desc_to_html/1, Files);
+		Servers_Wildcard =/= 0 ->
+			loop(fun server_desc_to_html/1, Servers);
+		true ->
+			Line
+	end.
+
+loop(_, []) -> [];
+loop(Fun, [L|LS]) ->
+	Fun(L) ++ loop(Fun, LS).
+
+server_desc_to_html({Count, lo, _}) ->
+	IP_Str = "*" ++ ip_to_string(transport_system:my_ip()),
+	Status = "online",
+	"<tr><td>" ++ IP_Str ++ "</td><td>" ++ num_to_string(Count) ++ 
+		"</td><td>" ++ Status ++ "</td></tr>";
+server_desc_to_html({Count, IP, _}) ->
+	IP_Str = ip_to_string(IP),
+	Status = "online",
+	"<tr><td>" ++ IP_Str ++ "</td><td>" ++ num_to_string(Count) ++ 
+		"</td><td>" ++ Status ++ "</td></tr>".
+
+file_desc_to_html({Filename, Locations}) ->
+	L_Temp = locations_to_string(Locations),
+	Locations_String = string:substr(L_Temp, 1, length(L_Temp)-2),
+	"<tr><td>" ++ Filename ++ "</td><td>" ++ Locations_String ++ 
+	"</td><td> <form method=\"get\" action=\"*1" ++ Filename ++ 
+	"\"><button type=\"submit\">Baixar Arquivo</button></form></td></tr>".
+
+locations_to_string([]) -> [];
+locations_to_string([{A,B,C,D}|LS]) ->
+	IP = ip_to_string({A,B,C,D}) ++ ", ",
+	IP ++ locations_to_string(LS);
+locations_to_string([here|LS]) ->
+	IP = ip_to_string(transport_system:my_ip()) ++ ", ",
+	"*" ++ IP ++ ", " ++ locations_to_string(LS).
+
+ip_to_string({A,B,C,D}) ->
+	num_to_string(A) ++ "." ++
+		num_to_string(B) ++ "." ++
+		num_to_string(C) ++ "." ++
+		num_to_string(D).
+
+num_to_string(Value) ->
+    lists:flatten(io_lib:format("~p", [Value])).
