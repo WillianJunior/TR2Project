@@ -85,7 +85,7 @@ handle_cast({new_file, Filename}, {Files, Servers}) ->
 	Desc_Msg = term_to_binary({new_descriptor, Filename}),
 	Desc_Sockets_Temp = lists:map(fun ({_A,_B,C}) -> C end, Servers),
 	Desc_Sockets = lists:delete(lo, Desc_Sockets_Temp),
-	Out = lists:map(fun (Socket) -> gen_tcp:send(Socket, Desc_Msg) end, 
+	lists:map(fun (Socket) -> gen_tcp:send(Socket, Desc_Msg) end, 
 		Desc_Sockets),
 
 	% upload files
@@ -118,7 +118,7 @@ handle_cast({new_file, Filename}, {Files, Servers}) ->
 	% add new descriptor locally
 	New_Files = Files ++ [{Filename, New_Location}],
 
-	{noreply, {New_Files, New_Servers}};
+	{noreply, {New_Files, lists:sort(New_Servers)}};
 
 handle_cast({new_descriptor, Filename}, {Files, Servers}) ->
 	io:format("[control_system] new_descriptor~n"),
@@ -150,7 +150,7 @@ handle_cast({upload_file, Filename, IP, Port}, {Files, Servers}) ->
 		transport_system:my_ip()}),
 	Update_Sockets = lists:map(fun ({_A,_B,C}) -> C end, Servers),
 	transport_system:multicast_tcp_list(Update_Sockets, Update_Msg),
-	{noreply, {New_Files, New_Servers}};
+	{noreply, {New_Files, lists:sort(New_Servers)}};
 
 handle_cast({update_file_ref, Filename, IP}, {Files, Servers}) ->
 	io:format("[control_system] update_file_ref~n"),
@@ -162,7 +162,7 @@ handle_cast({update_file_ref, Filename, IP}, {Files, Servers}) ->
 	{Count, IP, Socket} = lists:keyfind(IP, 2, Servers),
 	New_Servers = lists:keyreplace(IP, 2, Servers, {Count+1, IP, Socket}),
 
-	{noreply, {New_Files, New_Servers}};
+	{noreply, {New_Files, lists:sort(New_Servers)}};
 
 %%%%%%%%%%% Discard other messages %%%%%%%%%%%%
 
@@ -181,7 +181,7 @@ upload_file(Socket, Filename) ->
 			
 			% send call for destination
 			{ok, Port} = inet:port(Listener),
-			Out = gen_tcp:send(Socket, term_to_binary({upload_file, 
+			gen_tcp:send(Socket, term_to_binary({upload_file, 
 				Filename, transport_system:my_ip(), Port})),
 
 			% wait for file transfer connection
