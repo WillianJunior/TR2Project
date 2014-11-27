@@ -1,6 +1,6 @@
 -module(discovery_system).
 -behaviour(gen_server).
--export([start_link/1]).
+-export([start_link/0]).
 -export([init/1, code_change/3, terminate/2, handle_info/2, 
 	handle_cast/2, handle_call/3]).
 
@@ -8,25 +8,18 @@
 %%%%%%%%%%%%%%%%% Client API %%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-start_link(Arg) ->
-	gen_server:start_link({local, discovery_system}, discovery_system, [Arg], []).
+start_link() ->
+	gen_server:start_link({local, discovery_system}, discovery_system, [], []).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%% Server Main Functions %%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init(Arg) ->
+init(_) ->
 	io:format("[discovery_system] server started~n"),
-	F = lists:nth(1, Arg),
-	if
-		F /= first ->
-			io:format("[discovery_system] broadcasting hello~n"),
-			Msg = {hello, transport_system:my_ip()},
-			transport_system:broadcast(Msg);
-		true ->
-			io:format("[discovery_system] first server started~n"),
-			ok
-	end,
+	io:format("[discovery_system] broadcasting hello~n"),
+	Msg = {hello, transport_system:my_ip()},
+	transport_system:broadcast(Msg),
 	{ok, []}.
 
 code_change(_OldVsn, State, _Extra) ->

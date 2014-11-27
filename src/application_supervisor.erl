@@ -8,13 +8,13 @@
 -define (MAX_TIME, 15). % seconds
 -define (SHUTDOWN_TIME, 5000). % milliseconds
 
-start_link({Type, Port}) ->
-	supervisor:start_link({local,?MODULE}, ?MODULE, {Type, Port}).
+start_link(Port) ->
+	supervisor:start_link({local,?MODULE}, ?MODULE, Port).
  
-init({Type, Port}) ->
+init(Port) ->
 	{ok, {{one_for_one, ?MAX_RESTART, ?MAX_TIME},
 		[{dfs_supervisor,
-			{dfs_supervisor, start_link, [Type]},
+			{dfs_supervisor, start_link, []},
 			transient, 1000, supervisor, [dfs_supervisor]},
 		{transport_system,
 			{transport_system, start_link, []},
