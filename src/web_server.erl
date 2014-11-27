@@ -28,7 +28,7 @@ loop(ListenSocket) ->
 
 answer_http_request(Socket) ->
 	Resp_List = get_request(Socket),
-	io:format("~p~n~n", [Resp_List]),
+	%io:format("~p~n~n", [Resp_List]),
 	Request = re:split(lists:nth(1, Resp_List), " ", [{return,list}, trim]),
 	Type = lists:nth(1, Request),
 	case Type of
@@ -66,7 +66,6 @@ answer_http_request(Socket) ->
 			%% assuming multipart/form-data always
 			% get boundery and filename
 			{Boundery, Filename, New_Resp_list} = get_info(Socket, Resp_List),
-			
 			% get the start of the file from the last msg
 			if
 				length(New_Resp_list) > 19 ->
@@ -74,7 +73,6 @@ answer_http_request(Socket) ->
 				true ->
 					File_Start = []
 			end,
-
 			% get file if there is still some parts to receive
 			Last_Part = lists:last(New_Resp_list),
 			%io:format("Last_Part = ~p~n~n", [Last_Part]),
@@ -114,24 +112,32 @@ get_request(Socket) ->
 	re:split(binary_to_list(Resp),"\r\n",[{return,list}, trim]).
 
 get_info(Socket, Req) ->
-	%io:format("~p~n~n", [Req]),
 	if
-		length(Req) < 19 ->
+		length(Req) < 13 ->
 			%io:format("more~n~n"),
 			Next_Part = get_request(Socket),
 			get_info(Socket, Req ++ Next_Part);
 		true ->
-			{get_boundery(Req), get_filename(Req), Req}
+			Boundery = get_boundery(Req),
+			Filename = get_filename(Req),
+			{Boundery, Filename, Req}
 	end.
 
 get_boundery(Req) -> 
 	Bound_all = re:split(lists:nth(9,Req), ";", [{return,list}, trim]),
+	%io:format("BA: ~p~n", [Bound_all]),
 	Bound_F = lists:nth(2, Bound_all),
+	%io:format("BF: ~p~n", [Bound_F]),
 	Eq_Index = string:chr(Bound_F, $=),
-	string:substr(Bound_F, Eq_Index+1).
+	%io:format("Eq_Index: ~p~n", [Eq_Index]),
+	Final = string:substr(Bound_F, Eq_Index+1),
+	%io:format("Final: ~p~n", [Final]),
+	Final.
 
 get_filename(Req) ->
-	Temp = lists:nth(3, re:split(lists:nth(17,Req), ";", [{return,list}, trim])),
+	%io:format("1~n"),
+	Temp = lists:nth(3, re:split(lists:nth(13,Req), ";", [{return,list}, trim])),
+	%io:format("Temp: ~p~n", [Temp]),
 	lists:nth(2, re:split(Temp, "\"", [{return,list},trim])).
 
 get_file(Socket, Boundery) ->
@@ -206,7 +212,7 @@ locations_to_string([{A,B,C,D}|LS]) ->
 	IP ++ locations_to_string(LS);
 locations_to_string([here|LS]) ->
 	IP = ip_to_string(transport_system:my_ip()) ++ ", ",
-	"*" ++ IP ++ ", " ++ locations_to_string(LS).
+	"*" ++ IP ++ locations_to_string(LS).
 
 ip_to_string({A,B,C,D}) ->
 	num_to_string(A) ++ "." ++

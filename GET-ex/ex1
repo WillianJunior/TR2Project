@@ -1,0 +1,13 @@
+ex1
+
+["POST /index.html HTTP/1.1","Host: localhost:1234",
+ "User-Agent: Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:31.0) Gecko/20100101 Firefox/31.0",
+ "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+ "Accept-Language: en-US,en;q=0.5","Accept-Encoding: gzip, deflate",
+ "Referer: http://localhost:1234/index.html","Connection: keep-alive",
+ "Content-Type: multipart/form-data; boundary=---------------------------8426753031042663589466780187",
+ "Content-Length: 3655",[],
+ "-----------------------------8426753031042663589466780187",
+ "Content-Disposition: form-data; name=\"datafile\"; filename=\"lfdv.erl\"",
+ "Content-Type: text/x-erlang",[],
+ "-module(lfdv).\n-behaviour (gen_fsm).\n\n-export([start_link/2]).\n-export([start_node/1, get_state/1]).\n-export([init/1, paused/2, active/2, passive/2, passive/3, passive_updating/2, passive_updating/3]).\n\n%%% User API\nstart_link(Node, Neighbors) ->\n\tgen_fsm:start_link({local, Node}, lfdv, {Node, Neighbors}, []).\n\nstart_node(Node) ->\n\tgen_fsm:send_event(Node, start).\n\nget_state(Node) ->\n\tgen_fsm:sync_send_event(Node, request_state).\n\n%%% Server\ninit({Me, Neighbors}) ->\n\t{ok, paused, {Me, Neighbors, []}}.\n\n%%% States\npaused(start, {Me, Neighbors, _Node_Table}) ->\n\tNew_Node_Table = [{Me, 0}|generate_node_table(Neighbors)],\n\thail_all_neighbors(Neighbors, Me),\n\t{next_state, passive, {Me, Neighbors, New_Node_Table}}.\n\npassive({hello, From}, {Me, Neighbors, Node_Table}) ->\n\tio:format(\"[~s] passive~n\", [atom_to_list(Me)]),\n\tgen_f"]
