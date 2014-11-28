@@ -128,7 +128,7 @@ handle_cast({new_server_active, IP, Port}, {Files, Servers}) ->
 
 	% get old server's files descriptors
 	{ok, Old_Descs} = gen_tcp:recv(Passive_Socket, 0),
-	New_Files = merge_desc(IP, binary_to_term(Old_Descs), Files),
+	New_Files = merge_desc(binary_to_term(Old_Descs), IP, Files),
 
 	% send descriptors for stored files (if any)
 	Servers_With_Files = to_server_file_list(Servers, Files),
