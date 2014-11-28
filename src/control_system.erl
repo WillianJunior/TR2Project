@@ -86,12 +86,12 @@ handle_cast({new_server_passive, IP}, {Files, Servers}) ->
 	io:format("[control_system] balancing files~n"),
 	{Max_Count, _, _} = lists:nth(1, lists:reverse(Servers)),
 	Servers_With_Files = to_server_file_list(lists:reverse(Servers), Files),
-	balancer(Servers, Files, Servers_With_Files, {Socket, []}, Max_Count),
+	{New_Servers_Temp, New_Files, _Debug} = balancer(Servers, Files, Servers_With_Files, {Socket, []}, Max_Count),
 
 	% update servers list
-	New_Servers = Servers ++ [{0, IP, Socket}],
+	New_Servers = New_Servers_Temp ++ [{0, IP, Socket}],
 	New_Servers_Sorted = lists:sort(New_Servers),
-	{noreply, {Files, New_Servers_Sorted}};
+	{noreply, {New_Files, New_Servers_Sorted}};
 
 handle_cast({new_server_active, IP, Port}, {Files, Servers}) ->
 	io:format("[control_system] new_server_active~n"),
@@ -249,20 +249,19 @@ balancer(Servers_State, Files_State, Servers, {Newbee_Socket, Newbee_Files}, Dif
 					
 					% send the actual file and delete locally
 					transfer_file(Newbee_Socket, File, Servers_State),
-io:format("1~n"),
+
 					% remove self reference from the file location list
 					{File, Locations} = lists:keyfind(File, 1, Files_State),
 					IP = transport_system:my_ip(),
 					New_Locations = lists:delete(IP, Locations),
 					New_F_State = lists:keyreplace(File, 1, Files_State, {File, New_Locations}),
-io:format("2~n"),
+
 					% decrement self file counter
 					{Count3, IP, Socket} = lists:keyfind(IP, 2, Servers_State),
 					New_S_State = lists:keyreplace(IP, 2, Servers_State, {Count3-1, IP, Socket}),
-io:format("3~n"),
+
 					{New_S_State, New_F_State};
 				true ->
-io:format("0~n"),
 					{Servers_State, Files_State}
 			end,
 			balancer(New_Servers_State, New_Files_State, New_Servers, {Newbee_Socket, New_Newbee_Files}, Diff);
