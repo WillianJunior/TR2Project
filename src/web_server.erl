@@ -231,8 +231,8 @@ loop(_, []) -> [];
 loop(Fun, [L|LS]) ->
 	Fun(L) ++ loop(Fun, LS).
 
-server_desc_to_html({Count, lo, _}) ->
-	IP_Str = "*" ++ ip_to_string(transport_system:my_ip()),
+server_desc_to_html({Count, IP, lo}) ->
+	IP_Str = "*" ++ ip_to_string(IP),
 	Status = "online",
 	"<tr><td>" ++ IP_Str ++ "</td><td>" ++ num_to_string(Count) ++ 
 		"</td><td>" ++ Status ++ "</td></tr>";

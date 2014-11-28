@@ -80,7 +80,7 @@ get_random_port() ->
 	random:uniform(48127) + 1024.
 
 my_ip() -> 
-	{ok, [{addr, IP}]} = inet:ifget("wlan0", [addr]),
+	{ok, [{addr, IP}]} = inet:ifget("eth0", [addr]),
 	IP.
 
 

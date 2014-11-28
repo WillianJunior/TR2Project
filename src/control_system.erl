@@ -9,6 +9,17 @@
 -define (TIMEOUT, 1000). % in milliseconds
 -define (MAX_TRIES, 5).
 
+%%%%%%%%%%%% Data Structures %%%%%%%%%%%%
+% Servers = [Server]					%
+% Server = {File_Count, IP, Socket}		%
+% IP = {A,B,C,D}						%
+%										%
+% Files = [File]                      	%
+% File = {Filename, Locations}        	%
+% Locations = [IP]                    	%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%% Client API %%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -57,7 +68,9 @@ terminate(_Reason, _State) -> ok.
 %%%%%%%%%%% New Server Subprotocol %%%%%%%%%%%%
 
 handle_cast({new_server_passive, IP}, {Files, Servers}) ->
-	io:format("[control_system] new_server_passive"),
+	io:format("[control_system] new_server_passive~n"),
+	
+	% get a tcp connection to the new server
 	Listener = transport_system:get_random_port_tcp_listen_socket([]),
 	{ok, Port} = inet:port(Listener),
 	transport_system:unreliable_unicast(IP, 
@@ -68,6 +81,14 @@ handle_cast({new_server_passive, IP}, {Files, Servers}) ->
 			io:format("[control_system] accepted connection  to ~p~n", [IP]);
 		true -> ok
 	end,
+
+	% balance files between servers
+	io:format("[control_system] balancing files~n"),
+	{Max_Count, _, _} = lists:nth(1, lists:reverse(Servers)),
+	Servers_With_Files = to_server_file_list(lists:reverse(Servers), Files),
+	balancer(Servers, Files, Servers_With_Files, {Socket, []}, Max_Count),
+
+	% update servers list
 	New_Servers = Servers ++ [{0, IP, Socket}],
 	New_Servers_Sorted = lists:sort(New_Servers),
 	{noreply, {Files, New_Servers_Sorted}};
@@ -96,7 +117,6 @@ handle_cast({new_file, Filename}, {Files, Servers}) ->
 		Desc_Sockets),
 
 	% upload files
-	% TODO: support 1 live server
 	Upload_Sockets_Temp = lists:map(fun ({_A,_B,C}) -> C end, Servers),
 	Upload_Sockets = [lists:nth(1, Upload_Sockets_Temp), 
 		lists:nth(2, Upload_Sockets_Temp)],
@@ -131,6 +151,8 @@ handle_cast({new_descriptor, Filename}, {Files, Servers}) ->
 	io:format("[control_system] new_descriptor~n"),
 	New_Files = Files ++ [{Filename, []}],
 	{noreply, {New_Files, Servers}};
+
+%%%%%%%%%%%%% File Related Casts %%%%%%%%%%%%%%
 
 handle_cast({upload_file, Filename, IP, Port}, {Files, Servers}) ->
 	io:format("[control_system] upload_file~n"),
@@ -171,12 +193,129 @@ handle_cast({update_file_ref, Filename, IP}, {Files, Servers}) ->
 
 	{noreply, {New_Files, lists:sort(New_Servers)}};
 
+%%%%%%%% Servers Balancer Subprotocol %%%%%%%%%
+
+handle_cast({remove_file_ref, Filename, IP}, {Files, Servers}) ->
+	io:format("[control_system] remove_file_ref~n"),
+	
+	% remove IP from the file location list
+	{Filename, Locations} = lists:keyfind(Filename, 1, Files),
+	New_Locations = lists:delete(IP, Locations),
+	New_Files = lists:keyreplace(Filename, 1, Files, {Filename, New_Locations}),
+
+	% decrement file counter
+	{Count, IP, Socket} = lists:keyfind(IP, 2, Servers),
+	New_Servers = lists:keyreplace(IP, 2, Servers, {Count-1, IP, Socket}),
+
+	{noreply, {New_Files, lists:sort(New_Servers)}};
+
+
 %%%%%%%%%%% Discard other messages %%%%%%%%%%%%
 
 handle_cast(Other, State) ->
 	io:format("[control_system] discarting: ~p~n", [Other]),
 	{noreply, State}.
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%% Balancing Functions %%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+balancer(Servers_State, Files_State, Servers, {Newbee_Socket, Newbee_Files}, Dif) ->
+	if
+		Dif > 1 ->
+			% take first server (ie, server with most files)
+			{Count, Server_Name, Files} = lists:nth(1,Servers),
+			
+			% take its first non-present on Newbee file
+			File = take_first_non_repeated(Files, Newbee_Files),
+			New_Files = lists:delete(File, Files),
+			
+			% remove file from server and sort servers list (more files before)
+			New_Servers_Temp = lists:keyreplace(Server_Name, 2, Servers, {Count-1, Server_Name, New_Files}),
+			New_Servers = lists:reverse(lists:sort(New_Servers_Temp)),
+			
+			% add file to new server
+			New_Newbee_Files = [File|Newbee_Files],
+
+			% calculate current unbalance factor
+			{Count2, _, _} = lists:nth(1,New_Servers),
+			Diff = Count2 - length(New_Newbee_Files),
+			
+			% transfer file if it comes from this server
+			{New_Servers_State, New_Files_State} = if
+				Server_Name =:= here ->
+					io:format("[balancer] transfering file: ~p~n", [File]),
+					
+					% send the actual file and delete locally
+					transfer_file(Newbee_Socket, File, Servers_State),
+
+					% remove self reference from the file location list
+					{File, Locations} = lists:keyfind(File, 1, Files_State),
+					IP = transport_system:my_ip(),
+					New_Locations = lists:delete(IP, Locations),
+					New_F_State = lists:keyreplace(File, 1, Files_State, {File, New_Locations}),
+
+					% decrement self file counter
+					{Count2, IP, Socket} = lists:keyfind(IP, 2, Servers_State),
+					New_S_State = lists:keyreplace(IP, 2, Servers_State, {Count2-1, IP, Socket}),
+
+					{New_S_State, New_F_State};
+				true ->
+					{Servers_State, Files_State}
+			end,
+			balancer(New_Servers_State, New_Files_State, New_Servers, {Newbee_Socket, New_Newbee_Files}, Diff);
+		Dif =< 1 ->
+			{Servers_State, Files_State, {{Servers, Newbee_Files}}}
+	end.
+
+transfer_file(TCP_Socket, Filename, Servers) ->
+	% send file to the new destination
+	upload_file(TCP_Socket, Filename),
+
+	% remove file locally
+	file:delete("./files/" ++ Filename),
+
+	% notify removal of file
+	Update_Msg = term_to_binary({remove_file_ref, Filename, 
+		transport_system:my_ip()}),
+	Update_Sockets = lists:map(fun ({_A,_B,C}) -> C end, Servers),
+	transport_system:multicast_tcp_list(Update_Sockets, Update_Msg).
+
+
+take_first_non_repeated([], _) -> [];
+take_first_non_repeated([F|FS], Files) ->
+	Member = lists:member(F, Files),
+	if
+		Member ->
+			take_first_non_repeated(FS, Files);
+		true ->
+			F
+	end.
+
+to_server_file_list([], _) -> [];
+to_server_file_list([{_, IP, Socket}|Servers], Files) ->
+	S_Name = if
+		Socket =:= lo ->
+			here;
+		true ->
+			IP
+	end,
+	Server_Files = lists:foldr(fun (X,Acc) -> 
+		take_if_server(S_Name, X,Acc) end, [], Files),
+	[{length(Server_Files), S_Name, Server_Files}|to_server_file_list(Servers, Files)].
+
+take_if_server(IP, {Filename, Locations}, Acc) ->
+	Have = lists:member(IP, Locations),
+	if
+		Have ->
+			[Filename|Acc];
+		true ->
+			Acc
+	end.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%% TCP Helper Functions %%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 upload_file(Socket, Filename) ->
 	case Socket of
