@@ -8,6 +8,7 @@
 -define (TRANSPORT_UDP_PORT, 8678).
 -define (TIMEOUT, 1000). % in milliseconds
 -define (MAX_TRIES, 5).
+-define (SYNC_TCP_PORT, 4567).
 
 %%%%%%%%%%%% Data Structures %%%%%%%%%%%%
 % Servers = [Server]					%
@@ -83,14 +84,20 @@ handle_cast({new_server_passive, IP}, {Files, Servers}) ->
 	end,
 
 	io:format("[control_system] syncing descriptors - old server~n"),
+	% open a passive socket for the sync
+	Passive_Listener = gen_tcp:listen(?SYNC_TCP_PORT, [{active, false}, binary]),
+	Passive_Socket = transport_system:accept_tcp(Passive_Listener, ?MAX_TRIES),
+
 	% send descriptors for locally stored files
 	Servers_With_Files = to_server_file_list(lists:reverse(Servers), Files),
 	{_, here, Local_Descs} = lists:keyfind(here, 2, Servers_With_Files),
-	gen_tcp:send(Socket, term_to_binary(Local_Descs)),
+	gen_tcp:send(Passive_Socket, term_to_binary(Local_Descs)),
 
 	% get descriptors for any file it owns (if any)
-	{ok, R} = gen_tcp:recv(Socket, 0),
+	{ok, R} = gen_tcp:recv(Passive_Socket, 0),
 	New_Descs = binary_to_term(R),
+
+	gen_tcp:close(Passive_Socket),
 
 	% balance files between servers
 	io:format("[control_system] balancing files~n"),
@@ -116,14 +123,19 @@ handle_cast({new_server_active, IP, Port}, {Files, Servers}) ->
 	end,
 
 	io:format("[control_system] syncing descriptors - new server~n"),
+	% open a passive socket for the sync
+	Passive_Socket = transport_system:connect_tcp(IP, ?SYNC_TCP_PORT, [{active, false}], ?MAX_TRIES),
+
 	% get old server's files descriptors
-	{ok, Old_Descs} = gen_tcp:recv(Socket, 0),
+	{ok, Old_Descs} = gen_tcp:recv(Passive_Socket, 0),
 	New_Files = merge_desc(IP, binary_to_term(Old_Descs), Files),
 
 	% send descriptors for stored files (if any)
 	Servers_With_Files = to_server_file_list(Servers, Files),
 	{_, here, Local_Descs} = lists:keyfind(here, 2, Servers_With_Files),
-	gen_tcp:send(Socket, term_to_binary(Local_Descs)),
+	gen_tcp:send(Passive_Socket, term_to_binary(Local_Descs)),
+
+	gen_tcp:close(Passive_Socket),
 
 	% update servers list
 	New_Servers = Servers ++ [{0, IP, Socket}],
