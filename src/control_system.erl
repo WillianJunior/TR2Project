@@ -82,28 +82,51 @@ handle_cast({new_server_passive, IP}, {Files, Servers}) ->
 		true -> ok
 	end,
 
+	io:format("[control_system] syncing descriptors - old server~n"),
+	% send descriptors for locally stored files
+	Servers_With_Files = to_server_file_list(lists:reverse(Servers), Files),
+	{_, here, Local_Descs} = lists:keyfind(here, 2, Servers_With_Files),
+	gen_tcp:send(Socket, list_to_binary(Local_Descs)),
+
+	% get descriptors for any file it owns (if any)
+	New_Descs = gen_tcp:recv(Socket, 0),
+
 	% balance files between servers
 	io:format("[control_system] balancing files~n"),
 	{Max_Count, _, _} = lists:nth(1, lists:reverse(Servers)),
-	Servers_With_Files = to_server_file_list(lists:reverse(Servers), Files),
-	{New_Servers_Temp, New_Files, _Debug} = balancer(Servers, Files, Servers_With_Files, {Socket, []}, Max_Count),
+	{New_Servers_Temp, New_Files_Temp, _Debug} = balancer(Servers, Files, Servers_With_Files, {Socket, []}, Max_Count),
 
-	% update servers list
+	% update servers and files lists
+	New_Files = merge_desc(New_Descs, IP, New_Files_Temp),
 	New_Servers = New_Servers_Temp ++ [{0, IP, Socket}],
 	New_Servers_Sorted = lists:sort(New_Servers),
 	{noreply, {New_Files, New_Servers_Sorted}};
 
 handle_cast({new_server_active, IP, Port}, {Files, Servers}) ->
 	io:format("[control_system] new_server_active~n"),
+	
+	% connect via tcp to the old server
 	Socket = transport_system:connect_tcp(IP, Port, [], ?MAX_TRIES),
 	if
 		Socket /= unreach->
 			io:format("[control_system] new connection to ~p~n", [IP]);
 		true -> ok
 	end,
+
+	io:format("[control_system] syncing descriptors - new server~n"),
+	% get old server's files descriptors
+	Old_Descs = gen_tcp:recv(Socket, 0),
+	New_Files = merge_desc(IP, Old_Descs, Files),
+
+	% send descriptors for stored files (if any)
+	Servers_With_Files = to_server_file_list(Servers, Files),
+	{_, here, Local_Descs} = lists:keyfind(here, 2, Servers_With_Files),
+	gen_tcp:send(Socket, Local_Descs),
+
+	% update servers list
 	New_Servers = Servers ++ [{0, IP, Socket}],
 	New_Servers_Sorted = lists:sort(New_Servers),
-	{noreply, {Files, New_Servers_Sorted}};
+	{noreply, {New_Files, New_Servers_Sorted}};
 
 %%%%%%%%%%%% New File Subprotocol %%%%%%%%%%%%%
 
@@ -270,11 +293,7 @@ balancer(Servers_State, Files_State, Servers, {Newbee_Socket, Newbee_Files}, Dif
 	end.
 
 transfer_file(TCP_Socket, Filename, Servers) ->
-	% send descriptor of the file
-	Desc_Msg = term_to_binary({new_descriptor, Filename}),
-	gen_tcp:send(TCP_Socket, Desc_Msg),
-
-	% send the actual file to the new destination
+	% send the file to the new destination
 	upload_file(TCP_Socket, Filename),
 
 	% remove file locally
@@ -317,6 +336,17 @@ take_if_server(IP, {Filename, Locations}, Acc) ->
 		true ->
 			Acc
 	end.
+
+merge_desc([], _, Files) -> Files;
+merge_desc([D|DS], IP, Files) ->
+	Find = lists:keyfind(D, 1, Files),
+	New_Files = case Find of
+		{D, Locations} ->
+			lists:keyreplace(D, 1, Files, {D, [IP|Locations]});
+		false ->
+			[{D, [IP]}|Files]
+	end,
+	merge_desc(DS, IP, New_Files).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%% TCP Helper Functions %%%%%%%%%%%%
