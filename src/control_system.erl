@@ -86,10 +86,11 @@ handle_cast({new_server_passive, IP}, {Files, Servers}) ->
 	% send descriptors for locally stored files
 	Servers_With_Files = to_server_file_list(lists:reverse(Servers), Files),
 	{_, here, Local_Descs} = lists:keyfind(here, 2, Servers_With_Files),
-	gen_tcp:send(Socket, list_to_binary(Local_Descs)),
+	gen_tcp:send(Socket, term_to_binary(Local_Descs)),
 
 	% get descriptors for any file it owns (if any)
-	New_Descs = gen_tcp:recv(Socket, 0),
+	{ok, R} = gen_tcp:recv(Socket, 0),
+	New_Descs = binary_to_term(R),
 
 	% balance files between servers
 	io:format("[control_system] balancing files~n"),
@@ -97,6 +98,7 @@ handle_cast({new_server_passive, IP}, {Files, Servers}) ->
 	{New_Servers_Temp, New_Files_Temp, _Debug} = balancer(Servers, Files, Servers_With_Files, {Socket, []}, Max_Count),
 
 	% update servers and files lists
+	io:format("New_Descs: ~p~n~nNew_Files_Temp: ~p~n~n", [New_Descs, New_Files_Temp]),
 	New_Files = merge_desc(New_Descs, IP, New_Files_Temp),
 	New_Servers = New_Servers_Temp ++ [{0, IP, Socket}],
 	New_Servers_Sorted = lists:sort(New_Servers),
@@ -115,13 +117,13 @@ handle_cast({new_server_active, IP, Port}, {Files, Servers}) ->
 
 	io:format("[control_system] syncing descriptors - new server~n"),
 	% get old server's files descriptors
-	Old_Descs = gen_tcp:recv(Socket, 0),
-	New_Files = merge_desc(IP, Old_Descs, Files),
+	{ok, Old_Descs} = gen_tcp:recv(Socket, 0),
+	New_Files = merge_desc(IP, binary_to_term(Old_Descs), Files),
 
 	% send descriptors for stored files (if any)
 	Servers_With_Files = to_server_file_list(Servers, Files),
 	{_, here, Local_Descs} = lists:keyfind(here, 2, Servers_With_Files),
-	gen_tcp:send(Socket, Local_Descs),
+	gen_tcp:send(Socket, term_to_binary(Local_Descs)),
 
 	% update servers list
 	New_Servers = Servers ++ [{0, IP, Socket}],
