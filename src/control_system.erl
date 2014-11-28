@@ -94,7 +94,7 @@ handle_cast({new_server_passive, IP}, {Files, Servers}) ->
 	{noreply, {Files, New_Servers_Sorted}};
 
 handle_cast({new_server_active, IP, Port}, {Files, Servers}) ->
-	io:format("[control_system] new_server_active"),
+	io:format("[control_system] new_server_active~n"),
 	Socket = transport_system:connect_tcp(IP, Port, [], ?MAX_TRIES),
 	if
 		Socket /= unreach->
@@ -270,7 +270,11 @@ balancer(Servers_State, Files_State, Servers, {Newbee_Socket, Newbee_Files}, Dif
 	end.
 
 transfer_file(TCP_Socket, Filename, Servers) ->
-	% send file to the new destination
+	% send descriptor of the file
+	Desc_Msg = term_to_binary({new_descriptor, Filename}),
+	gen_tcp:send(TCP_Socket, Desc_Msg),
+
+	% send the actual file to the new destination
 	upload_file(TCP_Socket, Filename),
 
 	% remove file locally
