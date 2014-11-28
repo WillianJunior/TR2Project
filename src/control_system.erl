@@ -169,6 +169,7 @@ handle_cast({upload_file, Filename, IP, Port}, {Files, Servers}) ->
 
 	% download file
 	{ok, File} = gen_tcp:recv(Socket, 0),
+	gen_tcp:send(Socket, term_to_binary(ok)),
 	file:write_file("./files/" ++ Filename, File),
 
 	% close file transfer socket
@@ -329,6 +330,7 @@ upload_file(Socket, Filename) ->
 			{ok, Port} = inet:port(Listener),
 			gen_tcp:send(Socket, term_to_binary({upload_file, 
 				Filename, transport_system:my_ip(), Port})),
+			_Ok = gen_tcp:recv(Socket, 0),
 
 			% wait for file transfer connection
 			File_Socket = transport_system:accept_tcp(Listener, ?MAX_TRIES),
