@@ -252,11 +252,11 @@ balancer(Servers_State, Files_State, Servers, {Newbee_Socket, Newbee_Files}, Dif
 
 					% remove self reference from the file location list
 					{File, Locations} = lists:keyfind(File, 1, Files_State),
-					IP = transport_system:my_ip(),
-					New_Locations = lists:delete(IP, Locations),
+					New_Locations = lists:delete(here, Locations),
 					New_F_State = lists:keyreplace(File, 1, Files_State, {File, New_Locations}),
 
 					% decrement self file counter
+					IP = transport_system:my_ip(),
 					{Count3, IP, Socket} = lists:keyfind(IP, 2, Servers_State),
 					New_S_State = lists:keyreplace(IP, 2, Servers_State, {Count3-1, IP, Socket}),
 
