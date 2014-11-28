@@ -85,7 +85,7 @@ handle_cast({new_server_passive, IP}, {Files, Servers}) ->
 
 	io:format("[control_system] syncing descriptors - old server~n"),
 	% open a passive socket for the sync
-	Passive_Listener = gen_tcp:listen(?SYNC_TCP_PORT, [{active, false}, binary]),
+	{ok, Passive_Listener} = gen_tcp:listen(?SYNC_TCP_PORT, [{active, false}, binary]),
 	Passive_Socket = transport_system:accept_tcp(Passive_Listener, ?MAX_TRIES),
 
 	% send descriptors for locally stored files
