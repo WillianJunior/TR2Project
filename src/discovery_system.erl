@@ -53,9 +53,9 @@ handle_cast({hello, IP}, State) ->
 	end,
 	{noreply, State};
 
-handle_cast({hello_ack, IP, Port}, State) ->
+handle_cast({hello_ack, IP, Active_Port, Passive_Port}, State) ->
 	io:format("[discovery_system] got hello_ack~n"),
-	gen_server:cast(control_system, {new_server_active, IP, Port}),
+	gen_server:cast(control_system, {new_server_active, IP, Active_Port, Passive_Port}),
 	{noreply, State};
 
 handle_cast(Other, State) ->
