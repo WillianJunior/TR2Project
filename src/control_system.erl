@@ -71,22 +71,22 @@ terminate(_Reason, _State) -> ok.
 handle_cast({new_server_passive, IP}, {Files, Servers}) ->
 	io:format("[control_system] new_server_passive~n"),
 	
-	% get a tcp connection to the new server
-	Listener = transport_system:get_random_port_tcp_listen_socket([]),
-	{ok, Port} = inet:port(Listener),
+	% get two tcp connections to the new server, one active and one passive
+	Active_Listener = transport_system:get_random_port_tcp_listen_socket([]),
+	Passive_Listener = transport_system:get_random_port_tcp_listen_socket([{active, false}]),
+	{ok, Active_Port} = inet:port(Active_Listener),
+	{ok, Passive_Port} = inet:port(Passive_Listener),
 	transport_system:unreliable_unicast(IP, 
-		{hello_ack, transport_system:my_ip(), Port}),
-	Socket = transport_system:accept_tcp(Listener, ?MAX_TRIES),
+		{hello_ack, transport_system:my_ip(), Active_Port, Passive_Port}),
+	Active_Socket = transport_system:accept_tcp(Active_Listener, ?MAX_TRIES),
+	Passive_Socket = transport_system:accept_tcp(Passive_Listener, ?MAX_TRIES),
 	if
-		Socket /= unreach->
+		Active_Socket /= unreach->
 			io:format("[control_system] accepted connection  to ~p~n", [IP]);
 		true -> ok
 	end,
 
 	io:format("[control_system] syncing descriptors - old server~n"),
-	% open a passive socket for the sync
-	{ok, Passive_Listener} = gen_tcp:listen(?SYNC_TCP_PORT, [{active, false}, binary]),
-	Passive_Socket = transport_system:accept_tcp(Passive_Listener, ?MAX_TRIES),
 
 	% send descriptors for locally stored files
 	Servers_With_Files = to_server_file_list(lists:reverse(Servers), Files),
@@ -102,29 +102,28 @@ handle_cast({new_server_passive, IP}, {Files, Servers}) ->
 	% balance files between servers
 	io:format("[control_system] balancing files~n"),
 	{Max_Count, _, _} = lists:nth(1, lists:reverse(Servers)),
-	{New_Servers_Temp, New_Files_Temp, _Debug} = balancer(Servers, Files, Servers_With_Files, {Socket, []}, Max_Count),
+	{New_Servers_Temp, New_Files_Temp, _Debug} = balancer(Servers, Files, Servers_With_Files, {Active_Socket, []}, Max_Count),
 
 	% update servers and files lists
 	io:format("New_Descs: ~p~n~nNew_Files_Temp: ~p~n~n", [New_Descs, New_Files_Temp]),
 	New_Files = merge_desc(New_Descs, IP, New_Files_Temp),
-	New_Servers = New_Servers_Temp ++ [{0, IP, Socket}],
+	New_Servers = New_Servers_Temp ++ [{0, IP, Active_Socket}],
 	New_Servers_Sorted = lists:sort(New_Servers),
 	{noreply, {New_Files, New_Servers_Sorted}};
 
 handle_cast({new_server_active, IP, Port}, {Files, Servers}) ->
 	io:format("[control_system] new_server_active~n"),
 	
-	% connect via tcp to the old server
-	Socket = transport_system:connect_tcp(IP, Port, [], ?MAX_TRIES),
+	% connect via tcp to the old server with both active and passive sockets
+	Active_Socket = transport_system:connect_tcp(IP, Port, [], ?MAX_TRIES),
+	Passive_Socket = transport_system:connect_tcp(IP, Port, [{active, false}], ?MAX_TRIES),
 	if
-		Socket /= unreach->
+		Active_Socket /= unreach->
 			io:format("[control_system] new connection to ~p~n", [IP]);
 		true -> ok
 	end,
 
 	io:format("[control_system] syncing descriptors - new server~n"),
-	% open a passive socket for the sync
-	Passive_Socket = transport_system:connect_tcp(IP, ?SYNC_TCP_PORT, [{active, false}], ?MAX_TRIES),
 
 	% get old server's files descriptors
 	{ok, Old_Descs} = gen_tcp:recv(Passive_Socket, 0),
@@ -138,7 +137,7 @@ handle_cast({new_server_active, IP, Port}, {Files, Servers}) ->
 	gen_tcp:close(Passive_Socket),
 
 	% update servers list
-	New_Servers = Servers ++ [{0, IP, Socket}],
+	New_Servers = Servers ++ [{0, IP, Active_Socket}],
 	New_Servers_Sorted = lists:sort(New_Servers),
 	{noreply, {New_Files, New_Servers_Sorted}};
 
