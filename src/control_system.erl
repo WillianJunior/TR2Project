@@ -184,10 +184,10 @@ handle_cast({new_descriptor, Filename}, {Files, Servers}) ->
 
 %%%%%%%%%%%%% File Related Casts %%%%%%%%%%%%%%
 
-handle_cast({upload_file, Filename, IP, Port}, {Files, Servers}) ->
+handle_cast({upload_file, Filename, {File}}, {Files, Servers}) ->
 	io:format("[control_system] upload_file~n"),
 	% open a tcp connection for file transfer
-	Socket = transport_system:connect_tcp(IP, Port, [{active,false}], ?MAX_TRIES),
+	%Socket = transport_system:connect_tcp(IP, Port, [{active,false}], ?MAX_TRIES),
 
 	% add self location to the file descriptors' list
 	{_, Locations} = lists:keyfind(Filename, 1, Files),
@@ -199,12 +199,12 @@ handle_cast({upload_file, Filename, IP, Port}, {Files, Servers}) ->
 	New_Servers = lists:keyreplace(My_IP, 2, Servers, {Count+1, My_IP, lo}),
 
 	% download file
-	{ok, File} = gen_tcp:recv(Socket, 0),
-	gen_tcp:send(Socket, term_to_binary(ok)),
+	%{ok, File} = gen_tcp:recv(Socket, 0),
+	%gen_tcp:send(Socket, term_to_binary(ok)),
 	file:write_file("./files/" ++ Filename, File),
 
 	% close file transfer socket
-	gen_tcp:close(Socket),
+	%gen_tcp:close(Socket),
 
 	% send update to network
 	Update_Msg = term_to_binary({update_file_ref, Filename, 
@@ -439,7 +439,7 @@ upload_file(Socket, Filename) ->
 		_S ->
 			% transfer file
 			{ok, File} = file:read_file("./files/" ++ Filename),
-			gen_tcp:send(Socket, term_to_binary({upload_file, Filename, File})),
+			gen_tcp:send(Socket, term_to_binary({upload_file, Filename, {File}})),
 			false
 	end.
 
