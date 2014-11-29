@@ -111,12 +111,12 @@ handle_cast({new_server_passive, IP}, {Files, Servers}) ->
 	New_Servers_Sorted = lists:sort(New_Servers),
 	{noreply, {New_Files, New_Servers_Sorted}};
 
-handle_cast({new_server_active, IP, Port}, {Files, Servers}) ->
+handle_cast({new_server_active, IP, Active_Port, Passive_Port}, {Files, Servers}) ->
 	io:format("[control_system] new_server_active~n"),
 	
 	% connect via tcp to the old server with both active and passive sockets
-	Active_Socket = transport_system:connect_tcp(IP, Port, [], ?MAX_TRIES),
-	Passive_Socket = transport_system:connect_tcp(IP, Port, [{active, false}], ?MAX_TRIES),
+	Active_Socket = transport_system:connect_tcp(IP, Active_Port, [], ?MAX_TRIES),
+	Passive_Socket = transport_system:connect_tcp(IP, Passive_Port, [{active, false}], ?MAX_TRIES),
 	if
 		Active_Socket /= unreach->
 			io:format("[control_system] new connection to ~p~n", [IP]);
