@@ -86,16 +86,20 @@ answer_http_request(Socket) ->
 			% get Boundary and filename
 			{Boundary, Filename, New_Resp_list, Content_Index} = get_info(Socket, Resp_List),
 			% get the start of the file from the last msg
+			%io:format("New_Resp_list: ~p~n~n", [New_Resp_list]),
 			if
-				length(New_Resp_list) > Content_Index ->
-					File_Start = lists:sublist(New_Resp_list, Content_Index+1);
+				length(New_Resp_list) > Content_Index+2 ->
+					File_Start = lists:nth(Content_Index+3, New_Resp_list);
 				true ->
 					File_Start = []
 			end,
+			%io:format("Content_Index: ~p~n~n", [Content_Index]),
+			%io:format("File_Start: ~p~n~n", [File_Start]),
 			% get file if there is still some parts to receive
 			Last_Part = lists:last(New_Resp_list),
 			%io:format("Last_Part = ~p~n~n", [Last_Part]),
 			End = string:str(Last_Part, Boundary),
+			%io:format("End: ~p~n~n", [End]),
 			if
 				End =:= 0 ->
 					io:format("[web_server] downloading the rest of the POST request~n"),
@@ -104,6 +108,7 @@ answer_http_request(Socket) ->
 					io:format("[web_server] no more parts of the POST request needed~n"),
 					File = lists:reverse(tl(lists:reverse(File_Start)))
 			end,
+			%io:format("File: ~p~n~n", [File]),
 			
 			% write file to a std dir
 			file:write_file("./files/" ++ Filename, list_to_binary(File)),
@@ -175,7 +180,7 @@ get_field(Req, Field) ->
 get_file(Socket, Boundary) ->
 	{ok, Resp} = gen_tcp:recv(Socket, 0),
 	Resp_List = re:split(binary_to_list(Resp),"\r\n",[{return,list}, trim]),
-	%io:format("post~n~p~n~n", [Resp_List]),
+	%io:format("Resp_List: ~p~n~n", [Resp_List]),
 	End = string:str(lists:last(Resp_List), Boundary),
 	if
 		End =:= 0 ->
