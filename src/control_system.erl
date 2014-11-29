@@ -268,12 +268,12 @@ handle_info({tcp_closed, Socket}, {Files, Servers}) ->
 	New_Servers = lists:keydelete(Socket, 3, Servers),
 
 	% send copies of files that aren't duplicated anymore if this is the first server
-	{_, _, Fs} = nth(1, New_Servers),
+	{_, _, Fs} = lists:nth(1, New_Servers),
 	if
-		Fs = lo ->
+		Fs =:= lo ->
 			_Debug = dead_server_balance(New_Files, New_Servers, New_Files);
 		true ->
-			ok.
+			ok
 	end,
 	{noreply, {New_Files, New_Servers}};
 
