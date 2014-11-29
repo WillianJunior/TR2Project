@@ -351,7 +351,8 @@ dead_server_balance([{Filename, Locations}|FS], Servers) ->
 			% if this server, actually send a copy of the file
 			if
 				Backup_Server =:= here ->
-					io:format("[dead_server_balance] sending a copy of ~p to ~p~n", [Filename, IP]);
+					io:format("[dead_server_balance] sending a copy of ~p to ~p~n", [Filename, IP]),
+					upload_file(Socket, Filename);
 				true ->
 					ok
 			end,
