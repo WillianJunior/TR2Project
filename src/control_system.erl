@@ -107,7 +107,7 @@ handle_cast({new_server_passive, IP}, {Files, Servers}) ->
 	% update servers and files lists
 	io:format("New_Descs: ~p~n~nNew_Files_Temp: ~p~n~n", [New_Descs, New_Files_Temp]),
 	New_Files = merge_desc(New_Descs, IP, New_Files_Temp),
-	New_Servers = New_Servers_Temp ++ [{0, IP, Active_Socket}],
+	New_Servers = New_Servers_Temp ++ [{length(New_Descs), IP, Active_Socket}],
 	New_Servers_Sorted = lists:sort(New_Servers),
 	{noreply, {New_Files, New_Servers_Sorted}};
 
@@ -137,7 +137,7 @@ handle_cast({new_server_active, IP, Active_Port, Passive_Port}, {Files, Servers}
 	gen_tcp:close(Passive_Socket),
 
 	% update servers list
-	New_Servers = Servers ++ [{0, IP, Active_Socket}],
+	New_Servers = Servers ++ [{length(Old_Descs), IP, Active_Socket}],
 	New_Servers_Sorted = lists:sort(New_Servers),
 	{noreply, {New_Files, New_Servers_Sorted}};
 
@@ -312,9 +312,12 @@ transfer_file(TCP_Socket, Filename, Servers) ->
 	% remove file locally
 	file:delete("./files/" ++ Filename),
 
-	% notify removal of file
+	% notify removal of file to receiving new server
 	Update_Msg = term_to_binary({remove_file_ref, Filename, 
 		transport_system:my_ip()}),
+	gen_tcp:send(TCP_Socket, Update_Msg),
+
+	% notify removal of file to all old servers
 	Update_Sockets = lists:map(fun ({_A,_B,C}) -> C end, Servers),
 	transport_system:multicast_tcp_list(Update_Sockets, Update_Msg).
 
