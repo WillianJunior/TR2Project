@@ -437,22 +437,9 @@ upload_file(Socket, Filename) ->
 		lo ->
 			true;
 		_S ->
-			% get a tcp listener for file transfer
-			Listener = transport_system:get_random_port_tcp_listen_socket([{active, false}]),
-			
-			% send call for destination
-			{ok, Port} = inet:port(Listener),
-			gen_tcp:send(Socket, term_to_binary({upload_file, 
-				Filename, transport_system:my_ip(), Port})),
-			_Ok = gen_tcp:recv(Socket, 0),
-
-			% wait for file transfer connection
-			File_Socket = transport_system:accept_tcp(Listener, ?MAX_TRIES),
-			
 			% transfer file
 			{ok, File} = file:read_file("./files/" ++ Filename),
-			gen_tcp:send(File_Socket, File),
-			gen_tcp:close(File_Socket),
+			gen_tcp:send(Socket, term_to_binary({upload_file, Filename, File})),
 			false
 	end.
 
