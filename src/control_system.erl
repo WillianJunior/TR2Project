@@ -149,8 +149,9 @@ handle_cast({new_file, Filename}, {Files, Servers}) ->
 	Upload_Sockets_Temp = lists:map(fun ({_A,_B,C}) -> C end, Servers),
 	Upload_Sockets = [lists:nth(1, Upload_Sockets_Temp), 
 		lists:nth(2, Upload_Sockets_Temp)],
-	Lo_List = lists:map(fun (Socket) -> upload_file(Socket, Filename) end, 
+	lists:map(fun (Socket) -> upload_file(Socket, Filename) end, 
 		Upload_Sockets),
+	Lo_List = lists:map(fun (S) -> S =:= lo end, Upload_Sockets),
 	Got_Lo = lists:foldr(fun (A,B) -> A or B end, false, Lo_List),
 	{New_Servers, New_Location} = if
 		not Got_Lo ->
@@ -439,28 +440,22 @@ upload_file(Socket, Filename) ->
 	spawn(?MODULE, deadlockable_upload_file, [Socket, Filename]).
 
 deadlockable_upload_file(Socket, Filename) ->
-	case Socket of
-		lo ->
-			true;
-		_S ->
-			% get a tcp listener for file transfer
-			Listener = transport_system:get_random_port_tcp_listen_socket([{active, false}]),
-			
-			% send call for destination
-			{ok, Port} = inet:port(Listener),
-			gen_tcp:send(Socket, term_to_binary({upload_file, 
-				Filename, transport_system:my_ip(), Port})),
-			_Ok = gen_tcp:recv(Socket, 0),
+	% get a tcp listener for file transfer
+	Listener = transport_system:get_random_port_tcp_listen_socket([{active, false}]),
+	
+	% send call for destination
+	{ok, Port} = inet:port(Listener),
+	gen_tcp:send(Socket, term_to_binary({upload_file, 
+		Filename, transport_system:my_ip(), Port})),
+	_Ok = gen_tcp:recv(Socket, 0),
 
-			% wait for file transfer connection
-			File_Socket = transport_system:accept_tcp(Listener, ?MAX_TRIES),
-			
-			% transfer file
-			{ok, File} = file:read_file("./files/" ++ Filename),
-			gen_tcp:send(File_Socket, File),
-			gen_tcp:close(File_Socket),
-			false
-	end.
+	% wait for file transfer connection
+	File_Socket = transport_system:accept_tcp(Listener, ?MAX_TRIES),
+	
+	% transfer file
+	{ok, File} = file:read_file("./files/" ++ Filename),
+	gen_tcp:send(File_Socket, File),
+	gen_tcp:close(File_Socket).
 
 remove_ref({Filename, Locations}, Server) ->
 	New_Locations = lists:delete(Server, Locations),
