@@ -136,6 +136,7 @@ accept_tcp(Listener, Try) ->
 		{ok, Socket} ->
 			Socket;
 		_Otherwise ->
+			io:format("trying accept ~p more times", [Try]),
 			accept_tcp(Listener, Try-1)
 	end.
 
@@ -146,5 +147,6 @@ connect_tcp(IP, Port, Args, Try) ->
 		{ok, Socket} ->
 			Socket;
 		_Otherwise ->
+			io:format("trying connect ~p more times", [Try]),
 			connect_tcp(IP, Port, Args, Try-1)
 	end.
