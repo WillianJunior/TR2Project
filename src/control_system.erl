@@ -3,7 +3,6 @@
 -export([start_link/0]).
 -export([init/1, get_state/0, new_file/1, code_change/3, terminate/2, handle_info/2, 
 	handle_cast/2, handle_call/3]).
--export ([deadlockable_upload_file/2]).
 
 -define (RED_MSGS, 3).
 -define (TRANSPORT_UDP_PORT, 8678).
@@ -435,38 +434,31 @@ merge_desc([D|DS], IP, Files) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % DEADLOCKABLE FUNCTION!!!!!!!!!
-% upload_file must be atomic between a pair of requesting servers
+% upload_file must be atomic between a pair of servers
 upload_file(Socket, Filename) ->
-	spawn(?MODULE, deadlockable_upload_file, [{Socket, Filename}]).
-
-deadlockable_upload_file({Socket, Filename}) ->
-	io:format("1~n"),
 	case Socket of
 		lo ->
-			io:format("2~n"),
 			true;
 		_S ->
-			io:format("3~n"),
 			% get a tcp listener for file transfer
 			Listener = transport_system:get_random_port_tcp_listen_socket([{active, false}]),
-			io:format("4~n"),
+			
 			% send call for destination
 			{ok, Port} = inet:port(Listener),
 			gen_tcp:send(Socket, term_to_binary({upload_file, 
 				Filename, transport_system:my_ip(), Port})),
 			_Ok = gen_tcp:recv(Socket, 0),
-io:format("5~n"),
+
 			% wait for file transfer connection
 			File_Socket = transport_system:accept_tcp(Listener, ?MAX_TRIES),
-			io:format("6~n"),
+			
 			% transfer file
 			{ok, File} = file:read_file("./files/" ++ Filename),
 			gen_tcp:send(File_Socket, File),
 			gen_tcp:close(File_Socket),
-			io:format("7~n"),
 			false
 	end.
-	
+
 remove_ref({Filename, Locations}, Server) ->
 	New_Locations = lists:delete(Server, Locations),
 	{Filename, New_Locations}.

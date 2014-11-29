@@ -7,7 +7,7 @@
 
 -define (TRANSPORT_UDP_PORT, 8678).
 -define (RED_MSGS, 3).
--define (TIMEOUT, 1000). % in milliseconds
+-define (TIMEOUT, 2000). % in milliseconds
 -define (MAX_TRIES, 5).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
