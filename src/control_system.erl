@@ -252,7 +252,7 @@ handle_cast({dead_server_balance, N}, {Files, Servers}) ->
 	if
 		Num_Servers > N ->
 			{_, _, Nxt_Socket} = lists:nth(N+1, Servers),
-			Bal_Msg = {dead_server_balance, N+1},
+			Bal_Msg = term_to_binary({dead_server_balance, N+1}),
 			gen_tcp:send(Nxt_Socket, Bal_Msg);
 		true ->
 			ok
@@ -289,7 +289,7 @@ handle_info({tcp_closed, Socket}, {Files, Servers}) ->
 			_Debug = dead_server_balance(New_Files, New_Servers, New_Files),
 			% call next server to balance
 			{_, _, Nxt_Socket} = lists:nth(2, New_Servers),
-			Bal_Msg = {dead_server_balance, 2},
+			Bal_Msg = term_to_binary({dead_server_balance, 2}),
 			gen_tcp:send(Nxt_Socket, Bal_Msg);
 		true ->
 			ok
