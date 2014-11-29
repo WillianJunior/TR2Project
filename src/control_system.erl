@@ -137,7 +137,7 @@ handle_cast({new_server_active, IP, Active_Port, Passive_Port}, {Files, Servers}
 	gen_tcp:close(Passive_Socket),
 
 	% update servers list
-	New_Servers = Servers ++ [{length(Old_Descs), IP, Active_Socket}],
+	New_Servers = Servers ++ [{length(binary_to_term(Old_Descs)), IP, Active_Socket}],
 	New_Servers_Sorted = lists:sort(New_Servers),
 	{noreply, {New_Files, New_Servers_Sorted}};
 
