@@ -8,7 +8,6 @@
 -define (TRANSPORT_UDP_PORT, 8678).
 -define (TIMEOUT, 1000). % in milliseconds
 -define (MAX_TRIES, 5).
--define (SYNC_TCP_PORT, 4567).
 
 %%%%%%%%%%%% Data Structures %%%%%%%%%%%%
 % Servers = [Server]					%
@@ -44,14 +43,6 @@ init(_) ->
 
 code_change(_OldVsn, State, _Extra) ->
 	{ok, State}.
-
-handle_info({tcp, _Port, Msg}, S) -> 
-	gen_server:cast(control_system, binary_to_term(Msg)),
-	{noreply, S};
-
-handle_info(Other, S) ->
-	io:format("[control_system] info discarted: ~p~n", [Other]),
-	{noreply, S}.
 
 handle_call(flush, _From, State) ->
 	{reply, State, State};
@@ -102,14 +93,15 @@ handle_cast({new_server_passive, IP}, {Files, Servers}) ->
 	% balance files between servers
 	io:format("[control_system] balancing files~n"),
 	{Max_Count, _, _} = lists:nth(1, lists:reverse(Servers)),
-	{New_Servers_Temp, New_Files_Temp, _Debug} = balancer(Servers, Files, Servers_With_Files, {Active_Socket, []}, Max_Count),
+	{New_Servers_Temp, New_Files_Temp, _Debug} = new_server_balance(Servers, Files, Servers_With_Files, {Active_Socket, []}, Max_Count),
 
 	% update servers and files lists
 	io:format("New_Descs: ~p~n~nNew_Files_Temp: ~p~n~n", [New_Descs, New_Files_Temp]),
 	New_Files = merge_desc(New_Descs, IP, New_Files_Temp),
 	New_Servers = New_Servers_Temp ++ [{length(New_Descs), IP, Active_Socket}],
+	New_Files_Sorted = lists:sort(New_Files),
 	New_Servers_Sorted = lists:sort(New_Servers),
-	{noreply, {New_Files, New_Servers_Sorted}};
+	{noreply, {New_Files_Sorted, New_Servers_Sorted}};
 
 handle_cast({new_server_active, IP, Active_Port, Passive_Port}, {Files, Servers}) ->
 	io:format("[control_system] new_server_active~n"),
@@ -128,6 +120,7 @@ handle_cast({new_server_active, IP, Active_Port, Passive_Port}, {Files, Servers}
 	% get old server's files descriptors
 	{ok, Old_Descs} = gen_tcp:recv(Passive_Socket, 0),
 	New_Files = merge_desc(binary_to_term(Old_Descs), IP, Files),
+	New_Files_Sorted = lists:sort(New_Files),
 
 	% send descriptors for stored files (if any)
 	Servers_With_Files = to_server_file_list(Servers, Files),
@@ -139,7 +132,7 @@ handle_cast({new_server_active, IP, Active_Port, Passive_Port}, {Files, Servers}
 	% update servers list
 	New_Servers = Servers ++ [{length(binary_to_term(Old_Descs)), IP, Active_Socket}],
 	New_Servers_Sorted = lists:sort(New_Servers),
-	{noreply, {New_Files, New_Servers_Sorted}};
+	{noreply, {New_Files_Sorted, New_Servers_Sorted}};
 
 %%%%%%%%%%%% New File Subprotocol %%%%%%%%%%%%%
 
@@ -180,13 +173,15 @@ handle_cast({new_file, Filename}, {Files, Servers}) ->
 
 	% add new descriptor locally
 	New_Files = Files ++ [{Filename, New_Location}],
+	New_Files_Sorted = lists:sort(New_Files),
 
-	{noreply, {New_Files, lists:sort(New_Servers)}};
+	{noreply, {New_Files_Sorted, lists:sort(New_Servers)}};
 
 handle_cast({new_descriptor, Filename}, {Files, Servers}) ->
 	io:format("[control_system] new_descriptor~n"),
 	New_Files = Files ++ [{Filename, []}],
-	{noreply, {New_Files, Servers}};
+	New_Files_Sorted = lists:sort(New_Files),
+	{noreply, {New_Files_Sorted, Servers}};
 
 %%%%%%%%%%%%% File Related Casts %%%%%%%%%%%%%%
 
@@ -198,6 +193,7 @@ handle_cast({upload_file, Filename, IP, Port}, {Files, Servers}) ->
 	% add self location to the file descriptors' list
 	{_, Locations} = lists:keyfind(Filename, 1, Files),
 	New_Files = lists:keyreplace(Filename, 1, Files, {Filename, Locations ++ [here]}),
+	New_Files_Sorted = lists:sort(New_Files),
 
 	% update file count
 	{Count, My_IP, lo} = lists:keyfind(transport_system:my_ip(), 2, Servers),
@@ -216,19 +212,20 @@ handle_cast({upload_file, Filename, IP, Port}, {Files, Servers}) ->
 		transport_system:my_ip()}),
 	Update_Sockets = lists:map(fun ({_A,_B,C}) -> C end, Servers),
 	transport_system:multicast_tcp_list(Update_Sockets, Update_Msg),
-	{noreply, {New_Files, lists:sort(New_Servers)}};
+	{noreply, {New_Files_Sorted, lists:sort(New_Servers)}};
 
 handle_cast({update_file_ref, Filename, IP}, {Files, Servers}) ->
 	io:format("[control_system] update_file_ref~n"),
 	% add self location to the file descriptors' list
 	{Filename, Locations} = lists:keyfind(Filename, 1, Files),
 	New_Files = lists:keyreplace(Filename, 1, Files, {Filename, Locations ++ [IP]}),
+	New_Files_Sorted = lists:sort(New_Files),
 
 	% increment file counter
 	{Count, IP, Socket} = lists:keyfind(IP, 2, Servers),
 	New_Servers = lists:keyreplace(IP, 2, Servers, {Count+1, IP, Socket}),
 
-	{noreply, {New_Files, lists:sort(New_Servers)}};
+	{noreply, {New_Files_Sorted, lists:sort(New_Servers)}};
 
 %%%%%%%% Servers Balancer Subprotocol %%%%%%%%%
 
@@ -239,25 +236,53 @@ handle_cast({remove_file_ref, Filename, IP}, {Files, Servers}) ->
 	{Filename, Locations} = lists:keyfind(Filename, 1, Files),
 	New_Locations = lists:delete(IP, Locations),
 	New_Files = lists:keyreplace(Filename, 1, Files, {Filename, New_Locations}),
+	New_Files_Sorted = lists:sort(New_Files),
 
 	% decrement file counter
 	{Count, IP, Socket} = lists:keyfind(IP, 2, Servers),
 	New_Servers = lists:keyreplace(IP, 2, Servers, {Count-1, IP, Socket}),
 
-	{noreply, {New_Files, lists:sort(New_Servers)}};
-
+	{noreply, {New_Files_Sorted, lists:sort(New_Servers)}};	
 
 %%%%%%%%%%% Discard other messages %%%%%%%%%%%%
 
 handle_cast(Other, State) ->
-	io:format("[control_system] discarting: ~p~n", [Other]),
+	io:format("[control_system] cast discarted: ~p~n", [Other]),
 	{noreply, State}.
+
+%%%%%%%%%%%% TCP Messages Routing %%%%%%%%%%%%%
+
+handle_info({tcp, _Port, Msg}, S) -> 
+	gen_server:cast(control_system, binary_to_term(Msg)),
+	{noreply, S};
+
+%%%%%%%%%%% Fault Tolerance Control %%%%%%%%%%%
+
+handle_info({tcp_closed, Socket}, {Files, Servers}) ->
+	io:format("[control_system] tcp_closed~n"),
+	
+	% remove dead server's references to files
+	Dead_Server = lists:keyfind(Socket, 3, Servers),
+	New_Files = lists:map(fun (X) -> remove_ref(X, Dead_Server) end, Files),
+
+	% remove dead server descriptor
+	New_Servers = lists:keydelete(Socket, 3, Servers),
+
+	% send copies of files that aren't duplicated anymore
+	_Debug = dead_server_balance(New_Files, New_Servers),
+	{noreply, {New_Files, New_Servers}};
+
+%%%%%%%%%%% Discard other messages %%%%%%%%%%%%
+
+handle_info(Other, S) ->
+	io:format("[control_system] info discarted: ~p~n", [Other]),
+	{noreply, S}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%% Balancing Functions %%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-balancer(Servers_State, Files_State, Servers, {Newbee_Socket, Newbee_Files}, Dif) ->
+new_server_balance(Servers_State, Files_State, Servers, {Newbee_Socket, Newbee_Files}, Dif) ->
 	if
 		Dif > 1 ->
 			% take first server (ie, server with most files)
@@ -281,7 +306,7 @@ balancer(Servers_State, Files_State, Servers, {Newbee_Socket, Newbee_Files}, Dif
 			% transfer file if it comes from this server
 			{New_Servers_State, New_Files_State} = if
 				Server_Name =:= here ->
-					io:format("[balancer] transfering file: ~p~n", [File]),
+					io:format("[new_server_balance] transfering file: ~p~n", [File]),
 					
 					% send the actual file and delete locally
 					transfer_file(Newbee_Socket, File, Servers_State),
@@ -300,10 +325,43 @@ balancer(Servers_State, Files_State, Servers, {Newbee_Socket, Newbee_Files}, Dif
 				true ->
 					{Servers_State, Files_State}
 			end,
-			balancer(New_Servers_State, New_Files_State, New_Servers, {Newbee_Socket, New_Newbee_Files}, Diff);
+			new_server_balance(New_Servers_State, New_Files_State, New_Servers, {Newbee_Socket, New_Newbee_Files}, Diff);
 		Dif =< 1 ->
 			{Servers_State, Files_State, {{Servers, Newbee_Files}}}
 	end.
+
+dead_server_balance([], _) -> [];
+dead_server_balance([{Filename, Locations}|FS], Servers) ->
+	Num_Locations = length(Locations),
+	% check if file is still duplicated
+	{New_File, New_Servers_Sorted} = if
+		Num_Locations < 2 ->
+			% take first server (i.e. server with least ammount of files)
+			{Count, IP, Socket} = lists:nth(1, Servers),
+			
+			% copy file to the first server
+			File = {Filename, [IP|Locations]},
+
+			% update server's file counter
+			New_Servers = lists:keyreplace(IP, 2, Servers, {Count+1, IP, Socket}),
+			New_S_Sorted = lists:sort(New_Servers),
+
+			% get the server that still has the file
+			Backup_Server = lists:nth(1, Locations),
+
+			% if this server, actually send a copy of the file
+			Me = transport_system:my_ip(),
+			if
+				Backup_Server =:= Me ->
+					io:format("[dead_server_balance] sending a copy of ~p to ~p~n", [Filename, IP]);
+				true ->
+					ok
+			end,
+			{File, New_S_Sorted};
+		true ->
+			{{Filename, Locations}, Servers}
+	end,
+	[New_File|dead_server_balance(FS, New_Servers_Sorted)].
 
 transfer_file(TCP_Socket, Filename, Servers) ->
 	% send the file to the new destination
@@ -365,7 +423,7 @@ merge_desc([D|DS], IP, Files) ->
 	merge_desc(DS, IP, New_Files).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%% TCP Helper Functions %%%%%%%%%%%%
+%%%%%%%%%%%%%% Helper Functions %%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 upload_file(Socket, Filename) ->
@@ -391,3 +449,7 @@ upload_file(Socket, Filename) ->
 			gen_tcp:close(File_Socket),
 			false
 	end.
+
+remove_ref({Filename, Locations}, Server) ->
+	New_Locations = lists:delete(Server, Locations),
+	{Filename, New_Locations}.
