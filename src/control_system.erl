@@ -244,6 +244,8 @@ handle_cast({remove_file_ref, Filename, IP}, {Files, Servers}) ->
 	{noreply, {New_Files_Sorted, lists:sort(New_Servers)}};
 
 handle_cast({dead_server_balance, N}, {Files, Servers}) ->
+	io:format("[control_system] dead_server_balance~n"),
+
 	% perform balance
 	_Debug = dead_server_balance(Files, Servers, Files),
 
@@ -256,7 +258,8 @@ handle_cast({dead_server_balance, N}, {Files, Servers}) ->
 			gen_tcp:send(Nxt_Socket, Bal_Msg);
 		true ->
 			ok
-	end;
+	end,
+	{noreply, {Files, Servers}};
 
 %%%%%%%%%%% Discard other messages %%%%%%%%%%%%
 
