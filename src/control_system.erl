@@ -262,7 +262,6 @@ handle_info({tcp_closed, Socket}, {Files, Servers}) ->
 	
 	% remove dead server's references to files
 	{_, Dead_Server, Socket} = lists:keyfind(Socket, 3, Servers),
-	io:format("Dead_Server: ~p~n", [Dead_Server]),
 	New_Files = lists:map(fun (X) -> remove_ref(X, Dead_Server) end, Files),
 
 	% remove dead server descriptor
@@ -333,7 +332,6 @@ new_server_balance(Servers_State, Files_State, Servers, {Newbee_Socket, Newbee_F
 dead_server_balance([], _) -> [];
 dead_server_balance([{Filename, Locations}|FS], Servers) ->
 	Num_Locations = length(Locations),
-	io:format("length: ~p~nLocations: ~p~n~n", [length(Locations), Locations]),
 	% check if file is still duplicated
 	{New_File, New_Servers_Sorted} = if
 		Num_Locations < 2 ->
@@ -351,9 +349,8 @@ dead_server_balance([{Filename, Locations}|FS], Servers) ->
 			Backup_Server = lists:nth(1, Locations),
 
 			% if this server, actually send a copy of the file
-			Me = transport_system:my_ip(),
 			if
-				Backup_Server =:= Me ->
+				Backup_Server =:= here ->
 					io:format("[dead_server_balance] sending a copy of ~p to ~p~n", [Filename, IP]);
 				true ->
 					ok
