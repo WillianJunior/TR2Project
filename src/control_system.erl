@@ -2,7 +2,7 @@
 -behaviour(gen_server).
 -export([start_link/0]).
 -export([init/1, get_state/0, new_file/1, code_change/3, terminate/2, handle_info/2, 
-	handle_cast/2, handle_call/3, unsafe_upload_file/1]).
+	handle_cast/2, handle_call/3]).
 
 -define (RED_MSGS, 3).
 -define (TRANSPORT_UDP_PORT, 8678).
@@ -148,9 +148,8 @@ handle_cast({new_file, Filename}, {Files, Servers}) ->
 	Upload_Sockets_Temp = lists:map(fun ({_A,_B,C}) -> C end, Servers),
 	Upload_Sockets = [lists:nth(1, Upload_Sockets_Temp), 
 		lists:nth(2, Upload_Sockets_Temp)],
-	lists:map(fun (Socket) -> upload_file(Socket, Filename) end, 
+	Lo_List = lists:map(fun (Socket) -> upload_file(Socket, Filename) end, 
 		Upload_Sockets),
-	Lo_List = lists:map(fun (S) -> S =:= lo end, Upload_Sockets),
 	Got_Lo = lists:foldr(fun (A,B) -> A or B end, false, Lo_List),
 	{New_Servers, New_Location} = if
 		not Got_Lo ->
@@ -268,8 +267,14 @@ handle_info({tcp_closed, Socket}, {Files, Servers}) ->
 	% remove dead server descriptor
 	New_Servers = lists:keydelete(Socket, 3, Servers),
 
-	% send copies of files that aren't duplicated anymore
-	_Debug = dead_server_balance(New_Files, New_Servers, New_Files),
+	% send copies of files that aren't duplicated anymore if this is the first server
+	{_, _, Fs} = nth(1, New_Servers),
+	if
+		Fs = lo ->
+			_Debug = dead_server_balance(New_Files, New_Servers, New_Files);
+		true ->
+			ok.
+	end,
 	{noreply, {New_Files, New_Servers}};
 
 %%%%%%%%%%% Discard other messages %%%%%%%%%%%%
@@ -435,11 +440,7 @@ merge_desc([D|DS], IP, Files) ->
 
 % DEADLOCKABLE FUNCTION!!!!!!!!!
 % upload_file must be atomic between a pair of servers
-
 upload_file(Socket, Filename) ->
-	spawn(control_system, unsafe_upload_file, [{Socket, Filename}]).
-
-unsafe_upload_file({Socket, Filename}) ->
 	case Socket of
 		lo ->
 			true;
