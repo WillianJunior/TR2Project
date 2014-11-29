@@ -268,7 +268,7 @@ handle_info({tcp_closed, Socket}, {Files, Servers}) ->
 	New_Servers = lists:keydelete(Socket, 3, Servers),
 
 	% send copies of files that aren't duplicated anymore
-	_Debug = dead_server_balance(New_Files, New_Servers),
+	_Debug = dead_server_balance(New_Files, New_Servers, New_Files),
 	{noreply, {New_Files, New_Servers}};
 
 %%%%%%%%%%% Discard other messages %%%%%%%%%%%%
@@ -329,8 +329,8 @@ new_server_balance(Servers_State, Files_State, Servers, {Newbee_Socket, Newbee_F
 			{Servers_State, Files_State, {{Servers, Newbee_Files}}}
 	end.
 
-dead_server_balance([], _) -> [];
-dead_server_balance([{Filename, Locations}|FS], Servers) ->
+dead_server_balance([], _, _) -> [];
+dead_server_balance([{Filename, Locations}|FS], Servers, Files_State) ->
 	Num_Locations = length(Locations),
 	% check if file is still duplicated
 	{New_File, New_Servers_Sorted} = if
@@ -352,7 +352,14 @@ dead_server_balance([{Filename, Locations}|FS], Servers) ->
 			if
 				Backup_Server =:= here ->
 					io:format("[dead_server_balance] sending a copy of ~p to ~p~n", [Filename, IP]),
-					upload_file(Socket, Filename);
+					
+					% check if the copy will be sent to self
+					if
+						Socket =:= lo ->
+							file_swap(Filename, Files_State, Servers);
+						true ->
+							upload_file(Socket, Filename)
+					end;
 				true ->
 					ok
 			end,
@@ -360,7 +367,7 @@ dead_server_balance([{Filename, Locations}|FS], Servers) ->
 		true ->
 			{{Filename, Locations}, Servers}
 	end,
-	[New_File|dead_server_balance(FS, New_Servers_Sorted)].
+	[New_File|dead_server_balance(FS, New_Servers_Sorted, Files_State)].
 
 transfer_file(TCP_Socket, Filename, Servers) ->
 	% send the file to the new destination
@@ -447,6 +454,17 @@ upload_file(Socket, Filename) ->
 			gen_tcp:send(File_Socket, File),
 			gen_tcp:close(File_Socket),
 			false
+	end.
+
+file_swap(File, [{_Filename, Locations}|FS], Servers) ->
+	Have = lists:member(here, Locations),
+	if
+		not Have ->
+			IP = lists:nth(1, lists:sort(Locations)),
+			{_, IP, Socket} = lists:keyfind(IP, 2, Servers),
+			upload_file(Socket, File);
+		true ->
+			file_swap(File, FS, Servers)
 	end.
 
 remove_ref({Filename, Locations}, Server) ->
