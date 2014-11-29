@@ -241,7 +241,22 @@ handle_cast({remove_file_ref, Filename, IP}, {Files, Servers}) ->
 	{Count, IP, Socket} = lists:keyfind(IP, 2, Servers),
 	New_Servers = lists:keyreplace(IP, 2, Servers, {Count-1, IP, Socket}),
 
-	{noreply, {New_Files_Sorted, lists:sort(New_Servers)}};	
+	{noreply, {New_Files_Sorted, lists:sort(New_Servers)}};
+
+handle_cast({dead_server_balance, N}, {Files, Servers}) ->
+	% perform balance
+	_Debug = dead_server_balance(Files, Servers, Files),
+
+	% call next server to balance (if there is one)
+	Num_Servers = length(Servers),
+	if
+		Num_Servers > N ->
+			{_, _, Nxt_Socket} = lists:nth(N+1, Servers),
+			Bal_Msg = {dead_server_balance, N+1},
+			gen_tcp:send(Nxt_Socket, Bal_Msg);
+		true ->
+			ok
+	end;
 
 %%%%%%%%%%% Discard other messages %%%%%%%%%%%%
 
@@ -271,7 +286,11 @@ handle_info({tcp_closed, Socket}, {Files, Servers}) ->
 	{_, _, Fs} = lists:nth(1, New_Servers),
 	if
 		Fs =:= lo ->
-			_Debug = dead_server_balance(New_Files, New_Servers, New_Files);
+			_Debug = dead_server_balance(New_Files, New_Servers, New_Files),
+			% call next server to balance
+			{_, _, Nxt_Socket} = lists:nth(2, New_Servers),
+			Bal_Msg = {dead_server_balance, 2},
+			gen_tcp:send(Nxt_Socket, Bal_Msg);
 		true ->
 			ok
 	end,
