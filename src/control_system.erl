@@ -96,7 +96,6 @@ handle_cast({new_server_passive, IP}, {Files, Servers}) ->
 	{New_Servers_Temp, New_Files_Temp, _Debug} = new_server_balance(Servers, Files, Servers_With_Files, {Active_Socket, []}, Max_Count),
 
 	% update servers and files lists
-	io:format("New_Descs: ~p~n~nNew_Files_Temp: ~p~n~n", [New_Descs, New_Files_Temp]),
 	New_Files = merge_desc(New_Descs, IP, New_Files_Temp),
 	New_Servers = New_Servers_Temp ++ [{length(New_Descs), IP, Active_Socket}],
 	New_Files_Sorted = lists:sort(New_Files),
@@ -262,7 +261,8 @@ handle_info({tcp_closed, Socket}, {Files, Servers}) ->
 	io:format("[control_system] tcp_closed~n"),
 	
 	% remove dead server's references to files
-	Dead_Server = lists:keyfind(Socket, 3, Servers),
+	{_, Dead_Server, Socket} = lists:keyfind(Socket, 3, Servers),
+	io:format("Dead_Server: ~p~n", [Dead_Server]),
 	New_Files = lists:map(fun (X) -> remove_ref(X, Dead_Server) end, Files),
 
 	% remove dead server descriptor
@@ -333,6 +333,7 @@ new_server_balance(Servers_State, Files_State, Servers, {Newbee_Socket, Newbee_F
 dead_server_balance([], _) -> [];
 dead_server_balance([{Filename, Locations}|FS], Servers) ->
 	Num_Locations = length(Locations),
+	io:format("length: ~p~nLocations: ~p~n~n", [length(Locations), Locations]),
 	% check if file is still duplicated
 	{New_File, New_Servers_Sorted} = if
 		Num_Locations < 2 ->
