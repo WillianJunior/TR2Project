@@ -335,8 +335,17 @@ dead_server_balance([{Filename, Locations}|FS], Servers, Files_State) ->
 	% check if file is still duplicated
 	{New_File, New_Servers_Sorted} = if
 		Num_Locations < 2 ->
+			% get the server that still has the file
+			Backup_Server = lists:nth(1, Locations),
+
 			% take first server (i.e. server with least ammount of files)
-			{Count, IP, Socket} = lists:nth(1, Servers),
+			{Count, IP, Socket} = if
+				Backup_Server =:= here ->
+					Servers_Temp = lists:keydelete(lo, 3, Servers),
+					lists:nth(1, Servers_Temp);
+				true ->
+					lists:nth(1, Servers)
+			end,
 			
 			% copy file to the first server
 			File = {Filename, [IP|Locations]},
@@ -345,21 +354,11 @@ dead_server_balance([{Filename, Locations}|FS], Servers, Files_State) ->
 			New_Servers = lists:keyreplace(IP, 2, Servers, {Count+1, IP, Socket}),
 			New_S_Sorted = lists:sort(New_Servers),
 
-			% get the server that still has the file
-			Backup_Server = lists:nth(1, Locations),
 
 			% if this server, actually send a copy of the file
 			if
 				Backup_Server =:= here ->
-					io:format("[dead_server_balance] sending a copy of ~p to ~p~n", [Filename, IP]),
-					
-					% check if the copy will be sent to self
-					if
-						Socket =:= lo ->
-							file_swap(Filename, Files_State, Servers);
-						true ->
-							upload_file(Socket, Filename)
-					end;
+					io:format("[dead_server_balance] sending a copy of ~p to ~p~n", [Filename, IP]);
 				true ->
 					ok
 			end,
@@ -454,17 +453,6 @@ upload_file(Socket, Filename) ->
 			gen_tcp:send(File_Socket, File),
 			gen_tcp:close(File_Socket),
 			false
-	end.
-
-file_swap(File, [{_Filename, Locations}|FS], Servers) ->
-	Have = lists:member(here, Locations),
-	if
-		not Have ->
-			IP = lists:nth(1, lists:sort(Locations)),
-			{_, IP, Socket} = lists:keyfind(IP, 2, Servers),
-			upload_file(Socket, File);
-		true ->
-			file_swap(File, FS, Servers)
 	end.
 
 remove_ref({Filename, Locations}, Server) ->
