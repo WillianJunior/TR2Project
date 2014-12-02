@@ -76,17 +76,11 @@ answer_http_request({Socket, Port}) ->
 							IP = lists:nth(random_int(length(Locations)), Locations),
 							{ok, Loc_Socket} = gen_tcp:connect(IP, Port, [{active, false}, binary]),
 							gen_tcp:send(Loc_Socket, Raw),
-							io:format("Raw: ~p~n", [Raw]),
 							{ok, New_Resp} = gen_tcp:recv(Loc_Socket, 0),
-							io:format("2~n"),
 							{ok, File} = gen_tcp:recv(Loc_Socket, 0),
-							io:format("3~n"),
 							gen_tcp:close(Loc_Socket),
-							io:format("4~n"),
 							gen_tcp:send(Socket, New_Resp),
-							io:format("5~n"),
-							gen_tcp:send(Socket, File),
-							io:format("6~n")
+							gen_tcp:send(Socket, File)
 					end;
 				true ->
 					% regular get html page
@@ -147,11 +141,14 @@ answer_http_request({Socket, Port}) ->
 			control_system:new_file(Filename),
 
 			% send response
-			Status_Line = "HTTP/1.0 204 No Content" ++ ?CRLF,
-			Content_Type_Line = "Content-Type: " ++ ?CRLF ++ ?CRLF,
-			Entity_Body = "",
-			Reply = Status_Line ++ Content_Type_Line ++ Entity_Body,
-			gen_tcp:send(Socket, list_to_binary(Reply)),
+			wait(1), %% gambi pra ficar mais bonito.....
+			State = control_system:get_state(),
+			HTML_File = parse_html("./html/index.html", State),
+			Status_Line = "HTTP/1.0 200 OK" ++ ?CRLF,
+			Content_Type_Line = "Content-Type: text/html" ++ ?CRLF ++ ?CRLF,
+			Reply = Status_Line ++ Content_Type_Line,
+			gen_tcp:send(Socket, Reply),
+			gen_tcp:send(Socket, HTML_File),
 			io:format("[web_server] finished POST request~n")
 	end,
 	gen_tcp:close(Socket),
@@ -175,56 +172,6 @@ system_terminate(Reason, _Parent, _Debug, _State) ->
 system_code_change(State, _Module, _OldVsn, _Extra) ->  
     io:format("Changed code!~n"),  
     {ok, State}. 
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%% Helper Functions %%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-get_request(Socket) ->
-	{ok, Resp} = gen_tcp:recv(Socket, 0),
-	{Resp, re:split(binary_to_list(Resp),"\r\n",[{return,list}, trim])}.
-
-get_info(Socket, Req) ->
-	if
-		length(Req) < 13 ->
-			%io:format("more~n~n"),
-			{_, Next_Part} = get_request(Socket),
-			get_info(Socket, Req ++ Next_Part);
-		true ->
-			{Boundary, _} = get_field(Req, "boundary="),
-			%io:format("boundary: ~p~n", [Boundary]),
-			{Filename_Temp, Content_Index} = get_field(Req, "filename="),
-			Filename = string:sub_string(Filename_Temp, 2, length(Filename_Temp)-1),
-			%io:format("filename: ~p~n", [Filename]),
-			{Boundary, Filename, Req, Content_Index}
-	end.
-
-get_field(Req, Field) -> 
-	Index_List = lists:map(fun (X) -> string:str(X, Field) end, Req),
-	Boundary_Index = lists:max(Index_List),
-	B_Temp_Index = index_of(Boundary_Index, Index_List),
-	Boundary_Temp = lists:nth(B_Temp_Index, Req),
-	Boundary = string:sub_string(Boundary_Temp, Boundary_Index + length(Field), length(Boundary_Temp)),
-	{Boundary, B_Temp_Index}.
-
-get_file(Socket, Boundary) ->
-	{ok, Resp} = gen_tcp:recv(Socket, 0),
-	Resp_List = re:split(binary_to_list(Resp),"\r\n",[{return,list}, trim]),
-	%io:format("Resp_List: ~p~n~n", [Resp_List]),
-	End = string:str(lists:last(Resp_List), Boundary),
-	if
-		End =:= 0 ->
-			lists:nth(1, Resp_List) ++ get_file(Socket, Boundary);
-		true ->
-			lists:nth(1, Resp_List)
-	end.
-
-index_of(Item, List) -> index_of(Item, List, 1).
-
-index_of(_, [], _)  -> not_found;
-index_of(Item, [Item|_], Index) -> Index;
-index_of(Item, [_|Tl], Index) -> index_of(Item, Tl, Index+1).
-
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%% Parsing Functions %%%%%%%%%%%%%%
@@ -302,8 +249,59 @@ num_to_string(Value) ->
     lists:flatten(io_lib:format("~p", [Value])).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%% File Downloading Functions %%%%%%%%%%
+%%%%%%%%%%%%%%% Helper Functions %%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+get_request(Socket) ->
+	{ok, Resp} = gen_tcp:recv(Socket, 0),
+	{Resp, re:split(binary_to_list(Resp),"\r\n",[{return,list}, trim])}.
+
+get_info(Socket, Req) ->
+	if
+		length(Req) < 13 ->
+			%io:format("more~n~n"),
+			{_, Next_Part} = get_request(Socket),
+			get_info(Socket, Req ++ Next_Part);
+		true ->
+			{Boundary, _} = get_field(Req, "boundary="),
+			%io:format("boundary: ~p~n", [Boundary]),
+			{Filename_Temp, Content_Index} = get_field(Req, "filename="),
+			Filename = string:sub_string(Filename_Temp, 2, length(Filename_Temp)-1),
+			%io:format("filename: ~p~n", [Filename]),
+			{Boundary, Filename, Req, Content_Index}
+	end.
+
+get_field(Req, Field) -> 
+	Index_List = lists:map(fun (X) -> string:str(X, Field) end, Req),
+	Boundary_Index = lists:max(Index_List),
+	B_Temp_Index = index_of(Boundary_Index, Index_List),
+	Boundary_Temp = lists:nth(B_Temp_Index, Req),
+	Boundary = string:sub_string(Boundary_Temp, Boundary_Index + length(Field), length(Boundary_Temp)),
+	{Boundary, B_Temp_Index}.
+
+get_file(Socket, Boundary) ->
+	{ok, Resp} = gen_tcp:recv(Socket, 0),
+	Resp_List = re:split(binary_to_list(Resp),"\r\n",[{return,list}, trim]),
+	%io:format("Resp_List: ~p~n~n", [Resp_List]),
+	End = string:str(lists:last(Resp_List), Boundary),
+	if
+		End =:= 0 ->
+			lists:nth(1, Resp_List) ++ get_file(Socket, Boundary);
+		true ->
+			lists:nth(1, Resp_List)
+	end.
+
+index_of(Item, List) -> index_of(Item, List, 1).
+
+index_of(_, [], _)  -> not_found;
+index_of(Item, [Item|_], Index) -> Index;
+index_of(Item, [_|Tl], Index) -> index_of(Item, Tl, Index+1).
 
 % random int from 1 to N
 random_int(N) -> lists:nth(1, [random:uniform(N) || _ <- lists:seq(1,1)]).
+
+
+wait(Sec) -> 
+   	receive
+   		after (1000 * Sec) -> ok
+    end.
