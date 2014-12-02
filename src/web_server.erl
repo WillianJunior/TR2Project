@@ -2,7 +2,7 @@
 -export([start_link/1, init/1, answer_http_request/1]).
 -export([system_code_change/4, system_continue/3, 
 	system_terminate/4, write_debug/3]).
--define (WEB_SERVER_PORT, 81).
+
 -define (CRLF, "\r\n").
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -13,20 +13,20 @@ start_link(Port) ->
 	{ok, ListenSocket} = gen_tcp:listen(Port, [{active, false}, binary]),
 	%Pid = spawn_link(?MODULE, init, [ListenSocket]),
 	%register(?MODULE, Pid).
-	proc_lib:start_link(?MODULE, init, [{self(), ListenSocket}]). 
+	proc_lib:start_link(?MODULE, init, [{self(), ListenSocket, Port}]). 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%% Server Main Functions %%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-init({Parent, Socket}) -> 
+init({Parent, Socket, Port}) -> 
 	io:format("[web_server] server started~n"),
 	register(?MODULE, self()),
     Debug = sys:debug_options([]),
     proc_lib:init_ack(Parent, {ok, self()}),
-    loop(Parent, Debug, Socket).
+    loop(Parent, Debug, {Socket, Port}).
 	
-loop(Parent, Debug, ListenSocket) ->
+loop(Parent, Debug, {ListenSocket, Port}) ->
 	receive
 		{system, From, Request} ->
 			sys:handle_system_msg(Request, From, Parent, 
@@ -39,14 +39,14 @@ loop(Parent, Debug, ListenSocket) ->
 	case Response of
 		{ok, AcceptSocket} ->
 			io:format("[web_server] received tcp request~n"),
-			spawn_link(?MODULE, answer_http_request, [AcceptSocket]);
+			spawn_link(?MODULE, answer_http_request, [{AcceptSocket, Port}]);
 		_R ->
 			ok
 	end,
-	loop(Parent, Debug, ListenSocket).
+	loop(Parent, Debug, {ListenSocket, Port}).
 
-answer_http_request(Socket) ->
-	Resp_List = get_request(Socket),
+answer_http_request({Socket, Port}) ->
+	{Raw, Resp_List} = get_request(Socket),
 	%io:format("~p~n~n", [Resp_List]),
 	Request = re:split(lists:nth(1, Resp_List), " ", [{return,list}, trim]),
 	Type = lists:nth(1, Request),
@@ -57,7 +57,37 @@ answer_http_request(Socket) ->
 			if
 				Download_Token =:= 2 ->
 					% download request
-					io:format("[web_server] GET request is a download request~n");
+					io:format("[web_server] GET request is a download request~n"),
+					Filename = string:sub_string(lists:nth(2, Request), Download_Token+1),
+					{Files, _Servers} = control_system:get_state(),
+				
+					% check if it's here
+					{_, Locations} = lists:keyfind(Filename, 1, Files),
+					Here = lists:member(here, Locations),
+					if
+						Here ->
+							{ok, File} = file:read_file("files/" ++ Filename),
+							Status_Line = "HTTP/1.0 200 OK" ++ ?CRLF,
+							Content_Type_Line = "Content-Type: application/octet-stream" ++ ?CRLF ++ ?CRLF,
+							Reply = Status_Line ++ Content_Type_Line,
+							gen_tcp:send(Socket, Reply),
+							gen_tcp:send(Socket, File);
+						true ->
+							IP = lists:nth(random_int(length(Locations)), Locations),
+							{ok, Loc_Socket} = gen_tcp:connect(IP, Port, [{active, false}, binary]),
+							gen_tcp:send(Loc_Socket, Raw),
+							io:format("Raw: ~p~n", [Raw]),
+							{ok, New_Resp} = gen_tcp:recv(Loc_Socket, 0),
+							io:format("2~n"),
+							{ok, File} = gen_tcp:recv(Loc_Socket, 0),
+							io:format("3~n"),
+							gen_tcp:close(Loc_Socket),
+							io:format("4~n"),
+							gen_tcp:send(Socket, New_Resp),
+							io:format("5~n"),
+							gen_tcp:send(Socket, File),
+							io:format("6~n")
+					end;
 				true ->
 					% regular get html page
 					io:format("[web_server] GET request is a html page request~n"),
@@ -152,13 +182,13 @@ system_code_change(State, _Module, _OldVsn, _Extra) ->
 
 get_request(Socket) ->
 	{ok, Resp} = gen_tcp:recv(Socket, 0),
-	re:split(binary_to_list(Resp),"\r\n",[{return,list}, trim]).
+	{Resp, re:split(binary_to_list(Resp),"\r\n",[{return,list}, trim])}.
 
 get_info(Socket, Req) ->
 	if
 		length(Req) < 13 ->
 			%io:format("more~n~n"),
-			Next_Part = get_request(Socket),
+			{_, Next_Part} = get_request(Socket),
 			get_info(Socket, Req ++ Next_Part);
 		true ->
 			{Boundary, _} = get_field(Req, "boundary="),
@@ -197,7 +227,7 @@ index_of(Item, [_|Tl], Index) -> index_of(Item, Tl, Index+1).
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%% Parsing Functions %%%%%%%%%%%%%
+%%%%%%%%%%%%%% Parsing Functions %%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 parse_html(Filename, State) ->
@@ -251,7 +281,7 @@ file_desc_to_html({Filename, Locations}) ->
 	L_Temp = locations_to_string(Locations),
 	Locations_String = string:substr(L_Temp, 1, length(L_Temp)-2),
 	"<tr><td>" ++ Filename ++ "</td><td>" ++ Locations_String ++ 
-	"</td><td> <form method=\"get\" action=\"*1" ++ Filename ++ 
+	"</td><td> <form method=\"get\" action=\"*" ++ Filename ++ 
 	"\"><button type=\"submit\">Baixar Arquivo</button></form></td></tr>".
 
 locations_to_string([]) -> [];
@@ -270,3 +300,10 @@ ip_to_string({A,B,C,D}) ->
 
 num_to_string(Value) ->
     lists:flatten(io_lib:format("~p", [Value])).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%% File Downloading Functions %%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% random int from 1 to N
+random_int(N) -> lists:nth(1, [random:uniform(N) || _ <- lists:seq(1,1)]).
